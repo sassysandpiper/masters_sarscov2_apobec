@@ -1,0 +1,401 @@
+---
+title: "ancestral_character_state"
+output: html_document
+date: "2023-06-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(phytools)
+
+```
+
+
+MANDATORY DATA HANDLING
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#######################################################################################################
+DATA HANDLING TO LOAD SEQUENCES, MAKE CONSENSUS, ETC.
+#######################################################################################################
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Same across all analysis files
+
+```{r}
+
+#############################################################################
+#STEP 1: READING SEQUENCES IN FROM FASTA FORMAT INTO DATA FRAME FOR ANALYSIS#
+#############################################################################
+
+
+# Read in the file
+# readLines() creates a variable where each element contains a string for each line of the file
+lines <- readLines("ancestral_RaT13G_allclades_n220.fasta")
+
+# Initialize empty vectors for names and sequences
+names_list <- c()
+sequences_list <- c()
+
+# Initialize new variables to hold the current names and sequence before adding them to the list
+current_name <- ""
+current_sequence <- ""
+
+
+# Parse the lines
+for (line in lines) { # goes through all the lines one by one 
+  if (substr(line, 1, 1) == ">") { #substr separates out the part of the string that is specified, if first character of line is equal to > (a names line), then
+    
+    # New name, save previous sequence
+    if (current_name != "") {
+      names_list <- c(names_list, current_name)
+      sequences_list <- c(sequences_list, current_sequence)
+    }
+    # Start new sequence with this name
+    current_name <- gsub('>', '', line) # removing >
+    current_sequence <- ""
+  } else {
+    # Add to current sequence
+    current_sequence <- paste(current_sequence, line, sep="")
+  }
+}
+
+# Save the last name and sequence
+names_list <- c(names_list, current_name)
+sequences_list <- c(sequences_list, current_sequence)
+
+# Create a data frame with the name and sequence information
+df <- data.frame(name = names_list, sequence = sequences_list)
+
+# Cleaning up
+# Removing unwanted variables
+rm(list = c("current_name", "current_sequence", "line", "lines", "names_list", "sequences_list"))
+# Garbage Collection = removing temporary memory
+invisible(gc())
+
+
+```
+
+
+```{r}
+
+#######################################################
+#STEP 2: SEPARATING OUT EACH POSITION INTO ITS OWN ROW#
+#######################################################
+
+# get the maximum length of the strings in the sequence column
+max_length <- max(str_length(df$sequence))
+
+# extend the strings by adding dashes to the end
+df$sequence <- str_pad(df$sequence, max_length, "right", "-")
+
+# Separating each nucleotide
+df$split <- strsplit(df$sequence, split="")
+
+# Removing sequence column as its no longer needed
+df.min <- subset(df, select = c("name", "split"))
+
+# Making species names the column names
+df.wide <- pivot_wider(df.min, names_from = name, values_from = split)
+
+# Seperating the list into individual rows
+data <- df.wide %>% unnest_longer(c(colnames(df.wide)))
+
+# Change data frame to lower case
+data_lower <- apply(data, 2, function(x) {
+  if (is.character(x)) {
+    tolower(x)
+  } else {
+    x
+  }
+})
+
+# Convert the result back to a data frame
+data_lower <- as.data.frame(data_lower)
+
+# Set the original column names
+colnames(data_lower) <- colnames(data)
+
+# Change the data frame name back
+data <- data_lower
+
+# Adding position column
+data$position <- seq(1,nrow(data),1)
+
+# Cleaning environment
+rm(list=setdiff(ls(), c("data", "df")))
+invisible(gc())
+
+```
+
+
+```{r}
+
+################################################################
+#STEP 3: COUNTING FREQUENCY OF EACH NUCLEOTIDE IN EACH POSITION#
+################################################################
+
+nucleotides <- c("a", "t", "c", "g", "n", "-")
+
+
+for (i in nucleotides) {
+  x <- rowSums(data == tolower(i))         # Counts the number of occurrences of the nucleotide across the rows
+  data[ , ncol(data) + 1] <- x             # Append new column
+  colnames(data)[ncol(data)] <- paste(i)  # Rename column name
+  
+}
+
+#clean up environment
+rm(list = c("i", "nucleotides", "x"))
+invisible(gc())
+
+```
+
+
+
+
+Analysis
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##################################################################################################################
+FREQUENCY FILTERING PROOF OF CONCEPT: ANCESTRAL CHARACTER RECONSTRUCTION TO JUSTIFY MUTATION CALLING METHOD
+##################################################################################################################
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#Previous analysis done on other programmes#
+Since my computer is limited in its capacity to run highly computationally demanding analyses, previous analysis and data handling (such as tree building, ancestral sequence reconstruction, etc.) were done on a Linux terminal with much more computational power. For descriptions and details about previous analysis, please see the section "Mutation calling method proof of concept" in the aims_methods_discussion word doc.
+
+
+#Step 1#
+Mutation analysis on the sequence data frame "data". The number of each type of mutation is counted against a designated sequence. The designated sequence is modifiable. In this case, it is the reconstructed ancestral sequence that represents the most likely ancestral state of the last common ancestor of all sequences in the data set (n = 220 sample + WT WIV04). Mutations are called against the ancestral sequence, and the resulting mutation counts are stored in new columns named "n_a>t" and so on, and added into the data frame "analysis_dataset"
+
+#Step 2#
+Filtering out mutations that occur more than a frequency threshold. 6 new data frames are created, each with a different filtering threshold (0.01, 0.025, 0.05, 0.07, 0.1, no filter)
+
+#Step 3#
+Since we are only interested in the C>U mutations and how well our frequency filtering system works for calling only unique mutations that happened on the edges and not the roots, we will filter only for rows that contain C>U mutations in all data frames to minimise unnecessary analyses. Since each mutation data frame was created by setting a different filtering threshold on the same set of mutations, data sets created based on a less strict threshold (for instance, 10%) will also contain all mutations that are included in the data sets created based on a stricter threshold (for instance, 7% or 5%). To further streamline the analysis, any repeat rows are deleted, so that all data sets apart from the 1% filtered data set (strictest threshold) contains only mutations that added on top of the previous data frame due to the relaxing of the threshold.
+
+#Step 4#
+Plotting discrete characters onto phylogenetic trees using the "phytools" package requires me to input a character matrix in which the character of interest is represented in a binary fashion. In this step, the mutation data frames are reformatted to create character matrices, where each row is a sequence, and each column is a position that contains at least one C>U mutation in at least one sequence. If there is a mutation in a particular position for the sequence, the corresponding number in the matrix will be "1". Conversely, if there is no mutation in that position for the sequence, the corresponding number in the matrix will be "0". These completed character matrices are then exported as .csv files and wiped from the environment (has to be done because or else the rest of the code won't work, not entirely sure why, but also makes accessing these files a lot easier because I don't have to redo all of the previous analysis, I can just reimport the code)
+
+#Step 5
+The character matrices created in step 4 are reimported into the environment, along with the base phylogenetic tree (base_tree.tre, created using RaxML with 1000 bootstraps). A for loop loops through each column of each character matrix, extracts the column as its separate character matrix, and plots that specific mutation onto the base phylogenetic tree. The character tree is then saved with the file name "[insert filter threshold]X[insert mutation position]". Red branches signify where a C>U mutation is present. PLEASE NOTE: for some reason, the png()--dev.off() graphic saving commands do not work in R Markdown. To create phylogenetic trees, please run the for loops in the R script "making_trees.R".
+
+
+```{r}
+################################################################################
+#STEP 1: SEQUENCE CHANGE ANALYSIS#
+################################################################################
+
+#before comparing datasets, make a new data frame with all sequences to be analysed, and only the sequence that comparisons are being made to
+data_no_ref <- data[,3:ncol(data)]
+analysis_dataset <- cbind(data$ancestral_genome, data_no_ref) 
+#**change "consensus_seq" to WT sequence name if comparing against WT sequence
+
+
+#renaming consensus sequence in analysis_dataset
+names(analysis_dataset)[names(analysis_dataset) == 'data$ancestral_genome'] <- 'ancestral_seq'
+
+
+# Comparing to designated sequence
+ref_sequence_name = colnames(analysis_dataset)[1] 
+#**change index number depending on where the sequence you want to compare to is - 1 for consensus, 2 for WT
+
+# Make new col to store mutations
+analysis_dataset$`n_a>t` = 0
+analysis_dataset$`n_a>c` = 0
+analysis_dataset$`n_a>g` = 0
+analysis_dataset$`n_t>a` = 0
+analysis_dataset$`n_t>c` = 0
+analysis_dataset$`n_t>g` = 0
+analysis_dataset$`n_c>a` = 0
+analysis_dataset$`n_c>t` = 0
+analysis_dataset$`n_c>g` = 0
+analysis_dataset$`n_g>a` = 0
+analysis_dataset$`n_g>t` = 0
+analysis_dataset$`n_g>c` = 0
+
+
+#before starting code below, check what case the consensus/reference genome is in, and change case of the atcg accordingly in code
+for (i in 1:nrow(analysis_dataset)) {
+  if (analysis_dataset$ancestral_seq[i] == "a") {
+    analysis_dataset$`n_a>t`[i] = analysis_dataset$t[i]
+    analysis_dataset$`n_a>c`[i] = analysis_dataset$c[i]
+    analysis_dataset$`n_a>g`[i] = analysis_dataset$g[i]
+  }
+  if (analysis_dataset$ancestral_seq[i] == "t") {
+    analysis_dataset$`n_t>a`[i] = analysis_dataset$a[i]
+    analysis_dataset$`n_t>c`[i] = analysis_dataset$c[i]
+    analysis_dataset$`n_t>g`[i] = analysis_dataset$g[i]
+  }
+  if (analysis_dataset$ancestral_seq[i] == "c") {
+    analysis_dataset$`n_c>t`[i] = analysis_dataset$t[i]
+    analysis_dataset$`n_c>a`[i] = analysis_dataset$a[i]
+    analysis_dataset$`n_c>g`[i] = analysis_dataset$g[i]
+  }
+  if (analysis_dataset$ancestral_seq[i] == "g") {
+    analysis_dataset$`n_g>t`[i] = analysis_dataset$t[i]
+    analysis_dataset$`n_g>a`[i] = analysis_dataset$a[i]
+    analysis_dataset$`n_g>c`[i] = analysis_dataset$c[i]
+  }
+}
+
+
+# Cleaning Environment
+rm(list = c("i", "data_no_ref", "ref_sequence_name", "df"))
+invisible(gc())
+```
+
+
+```{r}
+################################################################################
+#Step 2: FILTERING FOR FREQUENCY AND CREATING NEW FILTERED DATA FRAMES#
+################################################################################
+
+#determine data size
+data_size <- 220
+
+#filter rows based on frequency of mutation
+frequency_threshold <- c(2.2, 5.5, 11, 15.4, 22, 220) 
+#Enter the raw number of mutations that represents the frequency threshold cutoff
+# for this analysis, 1% = 2.2, 2.5% = 5.5, 5% = 11, 7% = 15.4, 10% = 22
+
+
+#for loop to loop through multiple frequency thresholds
+for (i in 1:length(frequency_threshold)) {#
+  #creating a filtered intermediate, where only columns starting with "n_" are filtered (mutation count columns only)
+  #all mutation count columns filtered at the same time
+  #If any position has a count in any column that is above the mutation frequency threshold, omit the position from analysis
+  filtered_intermediate <-  analysis_dataset %>%
+                              filter(if_all(starts_with("n_"), ~ . <= frequency_threshold[i]))
+  
+  #make a new data frame for the filtered results of each frequency threshold (high freq mutation sites omitted)
+  #each data set will be named "frequency_threshold" followed by the frequency threshold, for instance, frequency_threshold50
+  assign(paste("filtered_freq_", (frequency_threshold[i]/220), sep = ""), filtered_intermediate)
+}
+
+#cleaning up environment
+rm(list = c("i", "frequency_threshold", "filtered_intermediate", "data_size"))
+invisible(gc())
+
+```
+
+
+```{r}
+#######################################################################################################
+#Step 3: FILTERING FOR ONLY POSITIONS WHERE THERE ARE C>U MUTATIONS AND STREAMLINING NESTED DATAFRAMES#
+#######################################################################################################
+
+#Create frequency filtered data sets, with the strictest frequency filter data frame having all 668 mutations, and the larger datasets having only the columns that were added on top of the strictest frequency filter (to reduce compuational demand)
+#Create all new filtered dataframes
+filtered_freq_0.01 <- filter(filtered_freq_0.01, filtered_freq_0.01$`n_c>t` != 0)
+filtered_freq_0.025 <- filter(filtered_freq_0.025, filtered_freq_0.025$`n_c>t` != 0)
+filtered_freq_0.05 <- filter(filtered_freq_0.05, filtered_freq_0.05$`n_c>t` != 0)
+filtered_freq_0.07 <- filter(filtered_freq_0.07, filtered_freq_0.07$`n_c>t` != 0)
+filtered_freq_0.1 <- filter(filtered_freq_0.1, filtered_freq_0.1$`n_c>t` != 0)
+no_filter <- filter(filtered_freq_1, filtered_freq_1$`n_c>t` !=0)
+
+#Starting from the least strict frequency filter, reduce each larger data frame to a only the columns that are not in the next most strict frequency filter data frame
+#no filter
+no_filter <- no_filter[!(no_filter$position %in% filtered_freq_0.1$position), ]
+
+#10%
+filtered_freq_0.1 <- filtered_freq_0.1[!(filtered_freq_0.1$position %in% filtered_freq_0.07$position), ]
+
+#7%
+filtered_freq_0.07 <- filtered_freq_0.07[!(filtered_freq_0.07$position %in% filtered_freq_0.05$position), ]
+
+#5%
+filtered_freq_0.05 <- filtered_freq_0.05[!(filtered_freq_0.05$position %in% filtered_freq_0.025$position), ]
+
+#2.5%
+filtered_freq_0.025 <- filtered_freq_0.025[!(filtered_freq_0.025$position %in% filtered_freq_0.01$position), ]
+
+
+
+#cleaning up environment
+rm(list = c("data", "analysis_dataset", "filtered_freq_1"))
+invisible(gc())
+
+```
+
+
+```{r}
+###########################################################################################################
+#Step 4: CREATING CHARACTER MATRICES USING ANALYSIS DATA & PREAPRING THEM FOR PHYLOGENETIC TREE ANNOTATION#
+###########################################################################################################
+
+#Create a list of data frame names
+df_list <- c("filtered_freq_0.1", "filtered_freq_0.07", "filtered_freq_0.05", "filtered_freq_0.025", "filtered_freq_0.01", "no_filter")
+
+for (df_name in df_list) {
+  df <- get(df_name)
+  
+  df <- data.frame(lapply(df, function(x) ifelse(x %in% c("n", "-", "c", "a", "g", "y", "m"), 0, ifelse(x == "t", 1, x))))
+  df <- df[, 1:223]
+  df <- df %>% mutate_all(as.numeric)
+  
+  df_pivot <- df %>% pivot_longer(!position, names_to = "sequences")
+  df_pivot <- df_pivot %>% pivot_wider(names_from = position, values_from = value)
+  my_rownames <- df_pivot$sequences
+  df_pivot <- df_pivot[, 2:ncol(df_pivot), drop = FALSE]
+  rownames(df_pivot) <- my_rownames
+
+  
+  assign(df_name, df_pivot)
+}
+
+
+#Save new data frames as a csv because for whatever reason not doing this makes it not work
+write.csv(filtered_freq_0.01, file = "filtered_freq_0.01.csv")
+write.csv(filtered_freq_0.025, file = "filtered_freq_0.025.csv")
+write.csv(filtered_freq_0.05, file = "filtered_freq_0.05.csv")
+write.csv(filtered_freq_0.07, file = "filtered_freq_0.07.csv")
+write.csv(filtered_freq_0.1, file = "filtered_freq_0.1.csv")
+write.csv(no_filter, file = "no_filter.csv")
+
+#Clear environment
+rm(list=ls())
+invisible(gc())
+
+```
+
+
+```{r}
+###########################################################################################################
+#Step 5: CHARACTER MAPPING ONTO BASE TREE#
+###########################################################################################################
+
+"C:\Users\1044832\Desktop\Analysis\Frequency filtering phylogenetic proof\character_matrices"
+
+#Reimport the character matrix csvs
+filtered_0.01 <- read.csv("character_matrices/filtered_freq_0.01.csv", row.names = 1)
+filtered_0.025 <- read.csv("character_matrices/filtered_freq_0.025.csv", row.names = 1)
+filtered_0.05 <- read.csv("character_matrices/filtered_freq_0.05.csv", row.names = 1)
+filtered_0.07 <- read.csv("character_matrices/filtered_freq_0.07.csv", row.names = 1)
+filtered_0.1 <- read.csv("character_matrices/filtered_freq_0.1.csv", row.names = 1)
+no_filter <- read.csv("character_matrices/no_filter.csv", row.names = 1)
+
+
+#import base phylogenetic tree
+base_tree <- read.tree("base_tree.tre")
+#Delete the outgroup that was only used for tree rooting
+base_tree <- drop.tip(base_tree, "'MN996532.2'")
+
+
+#Example for loop for creating character mapped trees. Please DO NOT run this code here, because the images won't save! Instead, run the R script "making_trees.R"
+for (j in 1:ncol(filtered_0.025)) {
+  #wipe current_mut
+  current_mut <- NA
+  #set current_mut to the current character matrix
+  current_mut <- setNames(filtered_0.025[,j], rownames(filtered_0.025))
+  #build the current ancestral character reconstruction tree
+  current_tree <- make.simmap(base_tree, current_mut, model = "ER")
+  #plot tree
+  png(paste0("C:/Users/1044832/Desktop/Analysis/Frequency filtering phylogenetic proof/0.025/0.025", colnames(filtered_0.025[j]), ".png"), width = 1200, height = 1200, units = "px", res = 600)
+  plot(current_tree, fsize=0.7,ftype="off", lwd = 1.5)
+  dev.off()
+}
+
+```
+
+
+
+
