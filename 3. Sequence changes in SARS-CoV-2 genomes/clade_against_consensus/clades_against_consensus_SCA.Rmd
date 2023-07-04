@@ -1,0 +1,565 @@
+---
+title: "secondary structure analysis"
+output: html_document
+date: "2023-05-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(ggpubr)
+library(readxl)
+
+```
+
+```{r}
+
+################################################################################
+#IMPORT WRANGLED DATA#
+################################################################################
+
+
+G_df <- read_csv("C:/Users/1265205/Desktop/Analysis/3. Sequence change (against outlier)/wrangled_datasets/G_n1000_consensus_ntcount.csv") 
+GH_df <- read_csv("C:/Users/1265205/Desktop/Analysis/3. Sequence change (against outlier)/wrangled_datasets/GH_n1000_consensus_ntcount.csv")
+GK_df <- read_csv("C:/Users/1265205/Desktop/Analysis/3. Sequence change (against outlier)/wrangled_datasets/GK_n1000_consensus_ntcount.csv")
+GR_df <- read_csv("C:/Users/1265205/Desktop/Analysis/3. Sequence change (against outlier)/wrangled_datasets/GR_n1000_consensus_ntcount.csv")
+GRA_df <- read_csv("C:/Users/1265205/Desktop/Analysis/3. Sequence change (against outlier)/wrangled_datasets/GRA_n1000_consensus_ntcount.csv")
+GRY_df <- read_csv("C:/Users/1265205/Desktop/Analysis/3. Sequence change (against outlier)/wrangled_datasets/GRY_n1000_consensus_ntcount.csv")
+GV_df <- read_csv("C:/Users/1265205/Desktop/Analysis/3. Sequence change (against outlier)/wrangled_datasets/GV_n1000_consensus_ntcount.csv")
+L_df <- read_csv("C:/Users/1265205/Desktop/Analysis/3. Sequence change (against outlier)/wrangled_datasets/L_n1000_consensus_ntcount.csv")
+O_df <- read_csv("C:/Users/1265205/Desktop/Analysis/3. Sequence change (against outlier)/wrangled_datasets/O_n1000_consensus_ntcount.csv")
+S_df <- read_csv("C:/Users/1265205/Desktop/Analysis/3. Sequence change (against outlier)/wrangled_datasets/S_n1000_consensus_ntcount.csv")
+V_df <- read_csv("C:/Users/1265205/Desktop/Analysis/3. Sequence change (against outlier)/wrangled_datasets/V_n1000_consensus_ntcount.csv")
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+#######################################################################################################
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+SEQUENCE CHANGE AGAINST EACH CLADE'S CONSENSUS
+
+***
+Note that each clade's consensus was called with a 75% divergence threshold
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#######################################################################################################
+
+```{r}
+################################################################################
+#STEP 1: SEQUENCE CHANGE ANALYSIS#
+################################################################################
+
+dflist <- ls(pattern = "_df")
+
+for (df in dflist) {
+  currentdf <- get(df)
+  
+  # Before comparing datasets, create a new data frame with all sequences to be analyzed and only the sequence that comparisons are being made to
+  data_no_ref <- currentdf[, 3:ncol(currentdf)]
+  analysis_dataset <- cbind(currentdf$consensus_seq, data_no_ref)
+  
+  # Renaming consensus sequence in analysis_dataset
+  names(analysis_dataset)[names(analysis_dataset) == 'currentdf$consensus_seq'] <- 'consensus_seq'
+  
+  # Make new columns to store mutations
+  analysis_dataset$`n_a>t` <- 0
+  analysis_dataset$`n_a>c` <- 0
+  analysis_dataset$`n_a>g` <- 0
+  analysis_dataset$`n_t>a` <- 0
+  analysis_dataset$`n_t>c` <- 0
+  analysis_dataset$`n_t>g` <- 0
+  analysis_dataset$`n_c>a` <- 0
+  analysis_dataset$`n_c>t` <- 0
+  analysis_dataset$`n_c>g` <- 0
+  analysis_dataset$`n_g>a` <- 0
+  analysis_dataset$`n_g>t` <- 0
+  analysis_dataset$`n_g>c` <- 0
+  
+  # Before starting the code below, check what case the consensus/reference genome is in and change the case of the ATCG accordingly in the code
+  
+  for (i in 1:nrow(analysis_dataset)) {
+    consensus_seq <- analysis_dataset$consensus_seq[i]
+    
+    if (consensus_seq == "a") {
+      analysis_dataset$`n_a>t`[i] <- analysis_dataset$t[i]
+      analysis_dataset$`n_a>c`[i] <- analysis_dataset$c[i]
+      analysis_dataset$`n_a>g`[i] <- analysis_dataset$g[i]
+    } else if (consensus_seq == "t") {
+      analysis_dataset$`n_t>a`[i] <- analysis_dataset$a[i]
+      analysis_dataset$`n_t>c`[i] <- analysis_dataset$c[i]
+      analysis_dataset$`n_t>g`[i] <- analysis_dataset$g[i]
+    } else if (consensus_seq == "c") {
+      analysis_dataset$`n_c>t`[i] <- analysis_dataset$t[i]
+      analysis_dataset$`n_c>a`[i] <- analysis_dataset$a[i]
+      analysis_dataset$`n_c>g`[i] <- analysis_dataset$g[i]
+    } else if (consensus_seq == "g") {
+      analysis_dataset$`n_g>t`[i] <- analysis_dataset$t[i]
+      analysis_dataset$`n_g>a`[i] <- analysis_dataset$a[i]
+      analysis_dataset$`n_g>c`[i] <- analysis_dataset$c[i]
+    }
+  }
+  
+  # Update the currentdf with the modified analysis_dataset
+  currentdf[, names(analysis_dataset)] <- analysis_dataset
+  
+  # Assign the updated currentdf back to the original data frame name
+  assign(df, currentdf)
+}
+
+
+
+# Cleaning Environment
+rm(list = c("analysis_dataset", "currentdf", "data_no_ref", "consensus_seq", "df", "i"))
+invisible(gc())
+
+
+```
+
+
+```{r}
+
+################################################################################
+#Step 2: FILTERING FOR FREQUENCY AND CREATING NEW FILTERED DATA FRAMES#
+################################################################################
+
+
+#filter rows based on frequency of mutation
+frequency_threshold <- c(50) 
+#Enter the raw number of mutations that represents the frequency threshold cutoff, i.e. 5% of 1000 = 50, so put in 50. Can analyse based on multiple frequency cutoffs by entering multiple cutoffs
+
+
+for(df in dflist){
+  currentdf <- get(df)
+  
+  #for loop to loop through multiple frequency thresholds
+  for (i in 1:length(frequency_threshold)) {#
+    #creating a filtered intermediate, where only columns starting with "n_" are filtered (mutation count columns only)
+    #all mutation count columns filtered at the same time
+    #If any position has a count in any column that is above the mutation frequency threshold, omit the position from analysis
+    filtered_intermediate <-  currentdf %>%
+                                filter(if_all(starts_with("n_"), ~ . <= frequency_threshold[i]))
+  }
+  assign(paste("filtered_freq_", df, sep = ""), filtered_intermediate)
+}
+
+
+#cleaning up environment
+keeplist <- ls(pattern = "filtered_freq_")
+rm(list=setdiff(ls(), c(paste(keeplist))))
+invisible(gc())
+
+
+#Save the csv files
+
+dflist <- ls()[sapply(ls(), function(x) is.data.frame(get(x)))]
+
+for (df in dflist){
+  currentdf <- get(df)
+  write.csv(currentdf, paste0(df, ".csv"), row.names = FALSE)
+}
+
+```
+
+
+```{r}
+
+##############################################################################
+#Step 3: CALCULATING SUMMARY DATASET OF ALL NT COUNTS AND ALL MUTATION COUNTS#
+##############################################################################
+
+dflist <- ls(pattern = "filtered_freq_")
+analysis_output_f0.05_consensus <- data.frame()
+
+for(df in dflist){
+  currentdf <- get(df)
+  tmp <- currentdf[, 4:ncol(currentdf)]
+  tmp <- sapply(tmp, as.numeric)
+  
+  #Summing all columns and storing the results in a new data frame
+  sum_df <- data.frame(t(colSums(tmp, na.rm = TRUE)))
+  #Setting the column names to match the original data frame
+  colnames(sum_df) <- colnames(tmp)
+  #Add a column into sum_df to identify the current clade
+  cladetmp <- data.frame(clade = NA)
+  cladetmp$clade <- sub('.*_(.*)_.*$', '\\1', paste(df))
+  sum_df <- cbind(cladetmp, sum_df)
+  #Add sum_df to a concat data frame holding results for all clades
+  analysis_output_f0.05_consensus <- rbind(analysis_output_f0.05_consensus, sum_df)
+}
+
+
+
+#ratio of C>U/U>C
+analysis_output_f0.05_consensus <- analysis_output_f0.05_consensus %>% mutate(`rc>t` = analysis_output_f0.05_consensus$`n_c>t` / analysis_output_f0.05_consensus$`n_t>c`)
+
+#normalised ratio of C>U/U>C (in relation to the number of Cs and Us, (nC>U/nU>C) * (nU/nC))
+analysis_output_f0.05_consensus <- analysis_output_f0.05_consensus %>% mutate(`nrc>t` = analysis_output_f0.05_consensus$`rc>t` * (analysis_output_f0.05_consensus$t / analysis_output_f0.05_consensus$c))
+
+#ratio of G>A/A>G
+analysis_output_f0.05_consensus <- analysis_output_f0.05_consensus %>% mutate(`rg>a` = analysis_output_f0.05_consensus$`n_g>a` / analysis_output_f0.05_consensus$`n_a>g`)
+
+#normalised ratio of G>A/A>G (in relation to the number of Gs and As, (nG>A/nA>G) * (nA/nG))
+analysis_output_f0.05_consensus <- analysis_output_f0.05_consensus %>% mutate(`nrg>a` = analysis_output_f0.05_consensus$`rg>a` * (analysis_output_f0.05_consensus$a / analysis_output_f0.05_consensus$g))
+
+
+
+rm(list = c("cladetmp", "currentdf", "sum_df", "tmp", "df"))
+invisible(gc())
+
+
+```
+
+
+```{r}
+#######################################################
+#NORMALISED MUTATION RATIO PLOTTING#
+#######################################################
+
+#~~~~~~~~~~~~~~~~~~~~#
+#Defining the palette#
+#~~~~~~~~~~~~~~~~~~~~#
+
+palette <- c("L" = "#002435",
+             "S" = "#00344d",
+             "V" = "#00496d",
+             "O" = "#006699",
+             "G" = "#1579a7",
+             "GV" = "#2a8cb5",
+             "GH" = "#3d9dc1",
+             "GR" = "#50adcd",
+             "GRY" = "#61bbd8",
+             "GK" = "#77cee6",
+             "GRA" = "#9defff")
+
+
+palette2 <- c("nrC>U" = "#006699",
+              "nrG>A" = "#669900")
+
+
+palette3 <- c("L" = "#2a4000",
+             "S" = "#3a5700",
+             "V" = "#527c00",
+             "O" = "#669900",
+             "G" = "#71a30e",
+             "GV" = "#83b324",
+             "GH" = "#91c036",
+             "GR" = "#a8d452",
+             "GRY" = "#b6e163",
+             "GK" = "#c5ee75",
+             "GRA" = "#d9ff8d")
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#Mean normalised mutation ratio: Bar chart#
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+
+#Building plot data
+plot.data.nr.mean <- data.frame(ratio = c("nrC>U", "nrG>A"))
+plot.data.nr.mean$value <- NA
+plot.data.nr.mean[1,2] <- mean(analysis_output_f0.05_consensus$`nrc>t`)
+plot.data.nr.mean[2,2] <- mean(analysis_output_f0.05_consensus$`nrg>a`)
+
+
+
+#####
+#Normality tests prior to building confidence intervals, calculating p values, etc.
+#####
+test_ct <- shapiro.test(analysis_output_f0.05_consensus$`nrc>t`)
+test_ct #p-value = 0.4653, normal
+
+test_ga <- shapiro.test(analysis_output_f0.05_consensus$`nrg>a`)
+test_ga #p-value = 0.2473, normal
+
+
+  #CI test
+  plot.data.nr.mean$CI_lower <- NA
+  plot.data.nr.mean$CI_upper <- NA
+  #C>U
+  CIcu <- t.test(analysis_output_f0.05_consensus$`nrc>t`)
+  plot.data.nr.mean[1,3] <- CIcu$conf.int[1]
+  plot.data.nr.mean[1,4] <- CIcu$conf.int[2]
+  #G>A
+  CIga <- t.test(analysis_output_f0.05_consensus$`nrg>a`)
+  plot.data.nr.mean[2,3] <- CIga$conf.int[1]
+  plot.data.nr.mean[2,4] <- CIga$conf.int[2]
+
+#Plot
+nr.mean.plot <- ggplot(plot.data.nr.mean, aes(x = ratio, y = value, fill = ratio))+
+  geom_col(width = 0.7, color = "black")+
+  theme_bw()+
+  geom_errorbar(aes(x = ratio, ymin= CI_lower, ymax = CI_upper), width=0.2, size = 1)+
+  scale_fill_manual(values = palette2, breaks = c("nr_C>U", "nr_G>A"))+
+  coord_cartesian(ylim = c(0, 12))+
+  labs(x = NULL, y = "Normalised ratio of mutations")+
+  geom_hline(yintercept = 1, color = "red", size = 0.8)+
+  theme(legend.position = "none")
+nr.mean.plot
+
+#P value: need to add on manually using biorendr
+p_meandiff <- t.test(analysis_output_f0.05_consensus$`nrc>t`, analysis_output_f0.05_consensus$`nrg>a`)
+p_meandiff
+
+#Save plot
+ggsave(nr.mean.plot, file = "nr_mean_plot.png", width = 4, height = 7, units = "in", dpi = 600)
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#Normalised C>U ratio by clade#
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~# 
+
+#Each normalised C>U ratio for each clade
+plot.data.nr <- as.data.frame(cbind(clade = analysis_output_f0.05_consensus$clade, `nrC>U` = analysis_output_f0.05_consensus$`nrc>t`, `nrG>A` = analysis_output_f0.05_consensus$`nrg>a`))
+plot.data.nr$`nrC>U` <- as.numeric(plot.data.nr$`nrC>U`)
+plot.data.nr$`nrG>A` <- as.numeric(plot.data.nr$`nrG>A`)
+
+nr.cu.clade.plot <- ggplot(plot.data.nr, aes(x = clade, y = `nrC>U`, fill = clade))+
+  geom_col(color = "black", width = 0.8)+
+  theme_bw()+
+  scale_x_discrete(limits = c("L", "S", "V", "O", "G", "GV", "GH", "GR", "GRY", "GK", "GRA"))+
+  scale_fill_manual(values = palette, breaks = c("L", "S", "V", "O", "G", "GV", "GH", "GR", "GRY", "GK", "GRA"))+
+  coord_cartesian(ylim = c(0, 12)) +
+  scale_y_continuous(breaks = seq(0, 12, by = 1))+
+  labs(x = NULL, y = "Normalised ratio of C>U mutations")+
+  geom_hline(yintercept = 1,size = 1, color = "red", linetype = "dashed")+
+  theme(legend.position = "none")
+  
+  
+
+
+nr.cu.clade.plot
+ggsave(nr.cu.clade.plot, file = "nr_cu_clade_plot.png", width = 7, height = 5, units = "in", dpi = 600)
+
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#Normalised G>A ratio by clade#
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~# 
+
+nr.ga.clade.plot <- ggplot(plot.data.nr, aes(x = clade, y = `nrG>A`, fill = clade))+
+  geom_col(color = "black", width = 0.8)+
+  theme_bw()+
+  scale_x_discrete(limits = c("L", "S", "V", "O", "G", "GV", "GH", "GR", "GRY", "GK", "GRA"))+
+  scale_fill_manual(values = palette3, breaks = c("L", "S", "V", "O", "G", "GV", "GH", "GR", "GRY", "GK", "GRA"))+
+  coord_cartesian(ylim = c(0, 12)) +
+  scale_y_continuous(breaks = seq(0, 12, by = 1))+
+  labs(x = NULL, y = "Normalised ratio of G>A mutations")+
+  geom_hline(yintercept = 1,size = 1, color = "red", linetype = "dashed")+
+  theme(legend.position = "none")
+  
+  
+
+
+nr.ga.clade.plot
+ggsave(nr.ga.clade.plot, file = "nr_ga_clade_plot.png", width = 7, height = 5, units = "in", dpi = 600)
+
+
+#Clean up environment
+rm(list = c("CIcu", "CIga", "nr.cu.clade.plot", "nr.ga.clade.plot", "nr.mean.plot", "p_meandiff", "plot.data.nr", "plot.data.nr.mean", "palette", "palette2", "palette3"))
+
+invisible(gc())
+
+```
+
+
+```{r}
+#######################################################
+#MUTATION FREQUENCY ACROSS GENOME PLOTTING#
+#######################################################
+
+cu_mutfreq <- data.frame()
+
+cu_mutfreq <- cbind(position = filtered_freq_G_df$position, 
+                           G_nct = filtered_freq_G_df$`n_c>t`, 
+                           GH_nct = filtered_freq_GH_df$`n_c>t`, 
+                           GK_nct = filtered_freq_GK_df$`n_c>t`, 
+                           GR_nct = filtered_freq_GR_df$`n_c>t`, 
+                           GRA_nct = filtered_freq_GRA_df$`n_c>t`, 
+                           GRY_nct = filtered_freq_GRY_df$`n_c>t`, 
+                           GV_nct = filtered_freq_GV_df$`n_c>t`, 
+                           L_nct = filtered_freq_L_df$`n_c>t`, 
+                           O_nct = filtered_freq_O_df$`n_c>t`, 
+                           S_nct = filtered_freq_S_df$`n_c>t`, 
+                           V_nct = filtered_freq_V_df$`n_c>t` )
+
+cu_mutfreq <- as.data.frame(cu_mutfreq)
+
+cu_mutfreq$sum_nct <- rowSums(cu_mutfreq[, 2:ncol(cu_mutfreq)])
+
+
+
+plot.data.ctmutfreq <- data.frame(variable = rep(cu_mutfreq$position, cu_mutfreq$sum_nct))
+
+
+plot.ct.mutfreq <- ggplot(plot.data.ctmutfreq, aes(x = variable))+
+  geom_histogram(binwidth = 10, fill = "#006699")+
+  theme_bw()+
+  labs(x = "Position", y = "C>U mutation frequency")
+  
+
+plot.ct.mutfreq
+
+
+ggsave(plot.ct.mutfreq, file = "ct_mutfreq_allclades_against_own_consensus_f0.05.png", width = 20, height = 5, units = "in", dpi = 600)
+
+#clean up environment
+rm(list = c("plot.ct.mutfreq", "plot.data.ctmutfreq", "sum_df", "sum.row", "cu_mutfreq", "df", "alldfs"))
+invisible(gc())
+
+```
+
+
+```{r}
+#######################################################
+#ALL MUTATIONS RAW COUNT PLOTTING#
+#######################################################
+
+plot.data.rawcount <- rbind(filtered_freq_G_df, 
+                            filtered_freq_G_df,
+                            filtered_freq_GH_df,
+                            filtered_freq_GK_df,
+                            filtered_freq_GR_df,
+                            filtered_freq_GRA_df,
+                            filtered_freq_GRY_df,
+                            filtered_freq_GV_df,
+                            filtered_freq_L_df,
+                            filtered_freq_O_df,
+                            filtered_freq_S_df,
+                            filtered_freq_V_df )
+
+  
+plot.data.rawcount <- plot.data.rawcount[, 10:21]
+sum.row <- colSums(plot.data.rawcount)
+plot.data.rawcount <- data.frame(Mutation = names(sum.row), value = sum.row, row.names = NULL)
+plot.data.rawcount$type <- ifelse(plot.data.rawcount$Mutation %in% c("n_c>t", "n_t>c", "n_a>g", "n_g>a"), "Transition", "Transversion")
+plot.data.rawcount$Mutation <- gsub("([a-z])_([a-z])>([a-z])", "\\U\\2>\\U\\3", plot.data.rawcount$Mutation, perl = TRUE)
+plot.data.rawcount$Mutation <- gsub("T", "U", plot.data.rawcount$Mutation)
+plot.data.rawcount$Mutation <- reorder(plot.data.rawcount$Mutation, -plot.data.rawcount$value)
+
+
+plot.mutation.rawcount <- ggplot(plot.data.rawcount, aes(x = Mutation, y = value, fill = type))+
+  geom_col(color = "black")+
+  theme_bw()+
+  scale_fill_manual(values = c("#990066", "#FFCC00"))+
+  labs(x = NULL, y = "Mutation count", fill = "Mutation type")
+  
+plot.mutation.rawcount
+
+
+ggsave(plot.mutation.rawcount, file = "allmutfreq_allclades_against_own_consensus_f0.05.png", width = 8, height = 6, units = "in", dpi = 600)
+```
+
+
+
+
+
+
+
+
+```{r}
+###########################################################
+#SAVING ALL DATA USED TO MAKE PLOTS SO I DONT GET CONFUSED#
+###########################################################
+
+#Raw mutation counts filtered at 5% frequency threshold for each clade
+for (df in dflist){
+  currentdf <- get(df)
+  write.csv(currentdf, file = paste0(df, ".csv"))
+}
+
+#Summary for all mutation counts etc.
+write.csv(analysis_output_f0.05_consensus, file = "summary_output_f0.05_consensus.csv")
+
+#Clade mean normalised mutation ratio
+write.csv(plot.data.nr.mean, file = "mean_normalised_mut_ratio_clade_against_consensus_f0.05.csv")
+
+#Each clade normliased C>U mutation ratio
+write.csv(plot.data.nr, file = "normalised_mut_ratio_cu_clade_against_consensus_f0.05.csv")
+
+#C>U mutation distribution across genome
+write.csv(plot.data.ctmutfreq, file = "CU_mutation_distribution_across_genome_f0.05.csv")
+
+```
+
+
+
+
+
+```{r}
+#Rather than just doing raw counts, will also do a percentage count
+for (df in dflist){
+  currentdf <- get(df)
+  currentdf <- currentdf[, 1003:1021]
+  assign(df, currentdf)
+}
+
+data <- rbind(filtered_freq_G_df, filtered_freq_GH_df, filtered_freq_GK_df, filtered_freq_GR_df, filtered_freq_GRA_df, filtered_freq_GRY_df, filtered_freq_GV_df, filtered_freq_L_df, filtered_freq_O_df, filtered_freq_S_df, filtered_freq_V_df)
+
+
+
+
+plot.data.percount <- data
+plot.data.percount <- data.frame(t(colSums(plot.data.percount)))
+write.csv(plot.data.percount, file = "plot.data.percount.csv")
+plot.data.percount <- read.csv("plot.data.percount.csv")
+
+
+#Recognise and change mutation name
+plot.data.percount$Mutation <- gsub("([a-z])_([a-z]).([a-z])", "\\U\\2>\\U\\3", plot.data.percount$Mutation, perl = TRUE)
+plot.data.percount$Mutation <- gsub("T", "U", plot.data.percount$Mutation)
+#Make the dataframe numeric
+plot.data.percount$mean <- as.numeric(plot.data.percount$mean)
+#reorder from highest to lowest
+plot.data.percount <- plot.data.percount[order(plot.data.percount$mean, decreasing = TRUE), ]
+#Change ratios to percentages
+plot.data.percount$mean <- plot.data.percount$mean * 100
+
+
+#Percent count plotting
+plot.mutation.percount <- ggplot(plot.data.percount, aes(x = Mutation, y = mean, fill = type))+
+  geom_col(color = "black")+
+  theme_bw()+
+  scale_fill_manual(values = c("#4a4a4a", "#cfcfcf"))+
+  coord_cartesian(ylim = c(0, 50))+
+  scale_y_continuous(breaks = seq(0, 50, by = 10))+
+  labs(x = NULL, y = "Mutation percentage prevalence (%)", fill = "Mutation type")+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title.y = element_text(size = 13))+
+  theme(axis.text.x = element_text(size = 12, face = "bold"))
+  
+plot.mutation.percount
+
+ggsave(plot.mutation.percount, file = "clades mutation percent prevalence whole genome.png", width = 8, height = 5, units = "in", dpi = 600)
+write.csv(plot.data.percount, file = "clades mutation percent prevalence.csv")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
