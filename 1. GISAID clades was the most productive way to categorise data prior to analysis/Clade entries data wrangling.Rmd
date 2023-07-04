@@ -1,0 +1,335 @@
+---
+title: "variant submission data"
+output: html_document
+date: "2023-04-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(readxl)
+library(RColorBrewer)
+library(ggpubr)
+
+```
+
+
+
+
+```{r}
+df <- read_excel("gisaid_clade_statistics.xlsx")
+
+```
+
+```{r}
+
+clades <- data.frame()
+
+clades <- filter(df, df$Type == "Clade")
+clades$`Week prior to` <- as.Date(clades$`Week prior to`)
+
+plot.data <- data.frame()
+
+plot.data <- cbind(as.Date(clades$`Week prior to`), clades$Value, clades$`Submission Count`)
+
+
+
+
+plot.data <- clades %>% 
+  select(`Week prior to`, Value, `Submission Count`) %>% 
+  mutate(`Week prior to` = as.Date(`Week prior to`))
+
+plot.data <- rename(plot.data, Date = `Week prior to`, Clade = Value,  Count = `Submission Count`)
+plot.data <- na.omit(plot.data)
+plot.data <- subset(plot.data, Clade != "GKA")
+
+
+plot.data.sum <- plot.data %>%
+  group_by(Date, Clade) %>%
+  summarize(count_sum = sum(Count))
+
+colnames(plot.data.sum) <- colnames(plot.data)
+
+
+```
+
+
+```{r}
+
+#assigning color scheme
+palette <- c("L" = "#1F6F1E",
+             "S" = "#669900",
+             "V" = "#CCEE66",
+             "O" = "#006699",
+             "G" = "#3399CC",
+             "GV" = "#990066",
+             "GH" = "#CC3399",
+             "GR" = "#FF6600",
+             "GRY" = "#FF9900",
+             "GK" = "#FFCC00",
+             "GRA" = "#FF006F")
+
+
+all <- ggplot(data = plot.data.sum, aes(x = Date, y = Count, color = Clade)) +
+            geom_line(size = 1.2) +
+            theme_bw() +
+            labs(color = "Variants of concern", x = "Date", y = "Number of entries", 
+                 title = "GISAID Submissions for GISAID Clades") +
+            scale_color_manual(name = "Clade", values = palette, breaks = c("L", "S", "V", "O", "G", "GV", "GH", "GR", "GRY", "GK", "GRA"))+
+            theme(aspect.ratio = 1/1.5)+
+            scale_x_date(date_labels = "%Y",
+                         limits = as.Date(c("2019-12-01", "2023-05-01")),
+                         breaks = as.Date(c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01")))
+
+all
+
+
+ ggsave(plot = last_plot(), file = "GISAID entry by clade.png", width = 6, height = 4, units = "in")
+
+
+```
+"L"   "G"   "GH"  "GR"  "GRA" "O"   "S"   "V"   "GV"  "GRY" "GK"
+S, O, L, V, G, GH, GR, GV, and GRY, GK
+```{r}
+
+#each clade separate plot
+plot.S <- filter(plot.data.sum, Clade == "S")
+S <- ggplot(data = plot.S, aes(x = Date, y = Count, color = "line")) +
+            geom_line(size = 1.2) +
+            scale_color_manual(values = "#669900")+
+            theme_bw() +
+            theme(legend.position = "none")+
+            labs(x = NULL, y = NULL) +
+            theme(aspect.ratio = 1/7)+
+            theme(axis.title.y = element_text(angle = 0, vjust = 0.5),
+                  axis.text.y=element_blank(),
+                  axis.ticks.y=element_blank())+
+            scale_x_date(date_labels = "%Y",
+                         limits = as.Date(c("2019-12-01", "2023-05-01")),
+                         breaks = as.Date(c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01")))+
+            theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+ggsave(S, file = "S.png", width = 6, height = 1, units = "in", dpi = 600)
+
+
+
+plot.O <- filter(plot.data.sum, Clade == "O")
+O <- ggplot(data = plot.O, aes(x = Date, y = Count, color = "line")) +
+            geom_line(size = 1.2) +
+            scale_color_manual(values = "#006699")+
+            theme_bw() +
+            theme(legend.position = "none")+
+            labs(x = NULL, y = NULL) +
+            theme(aspect.ratio = 1/7)+
+            theme(axis.title.y = element_text(angle = 0, vjust = 0.5),
+                  axis.text.y=element_blank(),
+                  axis.ticks.y=element_blank())+
+            scale_x_date(date_labels = "%Y",
+                         limits = as.Date(c("2019-12-01", "2023-05-01")),
+                         breaks = as.Date(c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01")))+
+            theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+ggsave(O, file = "O.png", width = 6, height = 1, units = "in", dpi = 600)
+
+
+
+
+
+plot.L <- filter(plot.data.sum, Clade == "L")
+L <- ggplot(data = plot.L, aes(x = Date, y = Count, color = "line")) +
+            geom_line(size = 1.2) +
+            scale_color_manual(values = "#1F6F1E")+
+            theme_bw() +
+            theme(legend.position = "none")+
+            labs(x = NULL, y = NULL) +
+            theme(aspect.ratio = 1/7)+
+            theme(axis.title.y = element_text(angle = 0, vjust = 0.5),
+                  axis.text.y=element_blank(),
+                  axis.ticks.y=element_blank())+
+            scale_x_date(date_labels = "%Y",
+                         limits = as.Date(c("2019-12-01", "2023-05-01")),
+                         breaks = as.Date(c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01")))+
+            theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+ggsave(L, file = "L.png", width = 6, height = 1, units = "in", dpi = 600)
+
+
+
+plot.V <- filter(plot.data.sum, Clade == "V")
+V <- ggplot(data = plot.V, aes(x = Date, y = Count, color = "line")) +
+            geom_line(size = 1.2) +
+            scale_color_manual(values = "#CCEE66")+
+            theme_bw() +
+            theme(legend.position = "none")+
+            labs(x = NULL, y = NULL) +
+            theme(aspect.ratio = 1/7)+
+            theme(axis.title.y = element_text(angle = 0, vjust = 0.5),
+                  axis.text.y=element_blank(),
+                  axis.ticks.y=element_blank())+
+            scale_x_date(date_labels = "%Y",
+                         limits = as.Date(c("2019-12-01", "2023-05-01")),
+                         breaks = as.Date(c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01")))+
+            theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+ggsave(V, file = "V.png", width = 6, height = 1, units = "in", dpi = 600)
+
+
+
+
+
+plot.G <- filter(plot.data.sum, Clade == "G")
+G <- ggplot(data = plot.G, aes(x = Date, y = Count, color = "line")) +
+            geom_line(size = 1.2) +
+            scale_color_manual(values = "#3399CC")+
+            theme_bw() +
+            theme(legend.position = "none")+
+            labs(x = NULL, y = NULL) +
+            theme(aspect.ratio = 1/7)+
+            theme(axis.title.y = element_text(angle = 0, vjust = 0.5),
+                  axis.text.y=element_blank(),
+                  axis.ticks.y=element_blank())+
+            scale_x_date(date_labels = "%Y",
+                         limits = as.Date(c("2019-12-01", "2023-05-01")),
+                         breaks = as.Date(c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01")))+
+            theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+ggsave(G, file = "G.png", width = 6, height = 1, units = "in", dpi = 600)
+
+
+
+
+
+plot.GH <- filter(plot.data.sum, Clade == "GH")
+GH <- ggplot(data = plot.GH, aes(x = Date, y = Count, color = "line")) +
+            geom_line(size = 1.2) +
+            scale_color_manual(values = "#CC3399")+
+            theme_bw() +
+            theme(legend.position = "none")+
+            labs(x = NULL, y = NULL) +
+            theme(aspect.ratio = 1/7)+
+            theme(axis.title.y = element_text(angle = 0, vjust = 0.5),
+                  axis.text.y=element_blank(),
+                  axis.ticks.y=element_blank())+
+            scale_x_date(date_labels = "%Y",
+                         limits = as.Date(c("2019-12-01", "2023-05-01")),
+                         breaks = as.Date(c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01")))+
+            theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+ggsave(GH, file = "GH.png", width = 6, height = 1, units = "in", dpi = 600)
+
+
+
+plot.GR <- filter(plot.data.sum, Clade == "GR")
+GR <- ggplot(data = plot.GR, aes(x = Date, y = Count, color = "line")) +
+            geom_line(size = 1.2) +
+            scale_color_manual(values = "#FF6600")+
+            theme_bw() +
+            theme(legend.position = "none")+
+            labs(x = NULL, y = NULL) +
+            theme(aspect.ratio = 1/7)+
+            theme(axis.title.y = element_text(angle = 0, vjust = 0.5),
+                  axis.text.y=element_blank(),
+                  axis.ticks.y=element_blank())+
+            scale_x_date(date_labels = "%Y",
+                         limits = as.Date(c("2019-12-01", "2023-05-01")),
+                         breaks = as.Date(c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01")))+
+            theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+ggsave(GR, file = "GR.png", width = 6, height = 1, units = "in", dpi = 600)
+
+
+
+
+
+plot.GRA <- filter(plot.data.sum, Clade == "GRA")
+GRA <- ggplot(data = plot.GRA, aes(x = Date, y = Count, color = "line")) +
+            geom_line(size = 1.2) +
+            scale_color_manual(values = "#FF006F")+
+            theme_bw() +
+            theme(legend.position = "none")+
+            labs(x = "Date", y = NULL) +
+            theme(aspect.ratio = 1/7)+
+            theme(axis.title.y = element_text(angle = 0, vjust = 0.5),
+                  axis.text.y=element_blank(),
+                  axis.ticks.y=element_blank())+
+            scale_x_date(date_labels = "%Y",
+                         limits = as.Date(c("2019-12-01", "2023-05-01")),
+                         breaks = as.Date(c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01")))
+
+ggsave(GRA, file = "GRA.png", width = 6, height = 1.2, units = "in", dpi = 600)
+
+
+
+
+plot.GV <- filter(plot.data.sum, Clade == "GV")
+GV <- ggplot(data = plot.GV, aes(x = Date, y = Count, color = "line")) +
+            geom_line(size = 1.2) +
+            scale_color_manual(values = "#990066")+
+            theme_bw() +
+            theme(legend.position = "none")+
+            labs(x = NULL, y = NULL) +
+            theme(aspect.ratio = 1/7)+
+            theme(axis.title.y = element_text(angle = 0, vjust = 0.5),
+                  axis.text.y=element_blank(),
+                  axis.ticks.y=element_blank())+
+            scale_x_date(date_labels = "%Y",
+                         limits = as.Date(c("2019-12-01", "2023-05-01")),
+                         breaks = as.Date(c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01")))+
+            theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+ggsave(GV, file = "GV.png", width = 6, height = 1, units = "in", dpi = 600)
+
+
+
+
+
+plot.GRY <- filter(plot.data.sum, Clade == "GRY")
+GRY <- ggplot(data = plot.GRY, aes(x = Date, y = Count, color = "line")) +
+            geom_line(size = 1.2) +
+            scale_color_manual(values = "#FF9900")+
+            theme_bw() +
+            theme(legend.position = "none")+
+            labs(x = NULL, y = NULL) +
+            theme(aspect.ratio = 1/7)+
+            theme(axis.title.y = element_text(angle = 0, vjust = 0.5),
+                  axis.text.y=element_blank(),
+                  axis.ticks.y=element_blank())+
+            scale_x_date(date_labels = "%Y",
+                         limits = as.Date(c("2019-12-01", "2023-05-01")),
+                         breaks = as.Date(c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01")))+
+            theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+ggsave(GRY, file = "GRY.png", width = 6, height = 1, units = "in", dpi = 600)
+
+
+
+
+
+plot.GK <- filter(plot.data.sum, Clade == "GK")
+GK <- ggplot(data = plot.GK, aes(x = Date, y = Count, color = "line")) +
+            geom_line(size = 1.2) +
+            scale_color_manual(values = "#FFCC00")+
+            theme_bw() +
+            theme(legend.position = "none")+
+            labs(x = NULL, y = NULL) +
+            theme(aspect.ratio = 1/7)+
+            theme(axis.title.y = element_text(angle = 0, vjust = 0.5),
+                  axis.text.y=element_blank(),
+                  axis.ticks.y=element_blank())+
+            scale_x_date(date_labels = "%Y",
+                         limits = as.Date(c("2019-12-01", "2023-05-01")),
+                         breaks = as.Date(c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01")))+
+            theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+ggsave(GK, file = "GK.png", width = 6, height = 1, units = "in", dpi = 600)
+
+
+
+
+
+
+#Save plot data
+write.csv(clades, file = "GISAID_clades_submission_data.csv")
+
+```

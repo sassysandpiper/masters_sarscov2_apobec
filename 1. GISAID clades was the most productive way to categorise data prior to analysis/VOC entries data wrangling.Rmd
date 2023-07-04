@@ -1,0 +1,248 @@
+---
+title: "variant submission data"
+output: html_document
+date: "2023-04-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(readxl)
+library(RColorBrewer)
+
+
+```
+
+
+
+
+```{r}
+alpha <- read_excel("alpha_submissions.xlsx")
+beta <- read_excel("beta_submissions.xlsx")
+gamma <- read_excel("gamma_submissions.xlsx")
+delta <- read_excel("delta_submissions.xlsx")
+omicron <- read_excel("omicron_submissions.xlsx")
+lambda <- read_excel("lambda_submissions.xlsx")
+```
+
+```{r}
+variants <- list(alpha, beta, delta, gamma, omicron, lambda)
+variant_names <- c("Alpha", "Beta", "Delta", "Gamma", "Omicron", "Lambda")
+
+column_names <- lapply(variants, function(x) colnames(x)[2])
+
+#filtering only for the rows where the entry for the second column is "count"
+for (i in seq_along(variants)) {
+  current_df <- variants[[i]]
+  current_variant <- variant_names[[i]]
+  assign(paste0("filtered_", current_variant), filter(current_df, !!sym(column_names[[i]]) == "count"))
+}
+
+rm(list=setdiff(ls(), c("filtered_Alpha", "filtered_Beta", "filtered_Delta", "filtered_Gamma", "filtered_Omicron", "filtered_Lambda", "variant_names")))
+
+```
+
+```{r}
+
+#sum all the counts for each variant and paste into a new data frame with the same column names as all columns after the second
+
+variants <- list(filtered_Alpha, filtered_Beta, filtered_Delta, filtered_Gamma, filtered_Lambda, filtered_Omicron)
+
+#filter the data frame for only columns with dates, and reassigning those columns into a new data frame called variant_count
+for (i in seq_along(variants)) {
+  current_df <- variants[[i]]
+  current_variant <- variant_names[[i]]
+  current_df[is.na(current_df)] <- 0
+  assign(paste0(current_variant, "_count"), current_df[, 3:length(current_df)])
+}
+
+rm(list=setdiff(ls(), c("Alpha_count", "Beta_count", "Delta_count", "Gamma_count", "Omicron_count", "Lambda_count", "variant_names")))
+
+
+
+
+variants <- list(Alpha_count, Beta_count, Delta_count, Gamma_count, Lambda_count, Omicron_count)
+all_count_sum <- data.frame(matrix(ncol = 0, nrow = 0))
+
+for (i in seq_along(variants)) {
+  current_df <- variants[[i]]
+  current_variant <- variant_names[[i]]
+  current_variant_df <- data.frame(variant = current_variant)
+  current_sum <- colSums(current_df)
+  current_sum_df <- data.frame(t(current_sum))
+  names(current_sum_df) <- names(current_df)
+  current_sum_df <- cbind(current_variant_df, current_sum_df)
+  all_count_sum <- rbind(all_count_sum, current_sum_df %>% select(colnames(current_sum_df)))
+}
+
+rm(list=setdiff(ls(), c("Alpha_count", "Beta_count", "Delta_count", "Gamma_count", "Omicron_count", "Lambda_count", "variant_names", "all_count_sum")))
+
+```
+
+
+```{r}
+
+#all entries plot
+
+plot.data <- all_count_sum %>% pivot_longer(!variant, names_to = "date", values_to = "count")
+plot.data$date <- as.Date(plot.data$date)
+
+color <- c("Alpha" = "#669900",
+         "Beta" = "#006699",
+         "Delta" = "#990066",
+         "Gamma" = "#FF6600",
+         "Lambda" = "#FFCC00",
+         "Omicron" = "#FF006F")
+
+all <- ggplot(data = plot.data, aes(x = date, y = count, color = variant)) +
+            geom_line(size = 1.2) +
+            theme_bw() +
+            labs(color = "VOC", x = "Date", y = "Number of entries",
+                 title = "GISAID Entry Count for Variants of Concern") +
+            scale_color_manual(values = color, breaks = c("Alpha", "Beta", "Gamma", "Delta", "Lambda", "Omicron"))+
+            theme(aspect.ratio = 1/1.5)+
+            scale_x_date(date_labels = "%Y",
+                         limits = as.Date(c("2019-12-01", "2023-05-01")),
+                         breaks = as.Date(c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01")))
+
+all
+
+
+ggsave(plot = last_plot(), file = "GISAID entry by VOC.png", width = 6, height = 4, units = "in")
+
+
+```
+
+```{r}
+
+#each VOC separate plot
+
+plot.alpha <- filter(plot.data, variant == "Alpha")
+
+alpha <- ggplot(data = plot.alpha, aes(x = date, y = count, color = "line")) +
+            geom_line(size = 1.2) +
+            scale_color_manual(values = "#669900")+
+            theme_bw() +
+            theme(legend.position = "none")+
+            labs(x = NULL, y = NULL) +
+            theme(aspect.ratio = 1/7)+
+            theme(axis.title.y = element_text(angle = 0, vjust = 0.5),
+                  axis.text.y=element_blank(),
+                  axis.ticks.y=element_blank())+
+            scale_x_date(date_labels = "%Y",
+                         limits = as.Date(c("2019-12-01", "2023-05-01")),
+                         breaks = as.Date(c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01")))+
+            theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+ggsave(alpha, file = "alpha.png", width = 6, height = 1, units = "in", dpi = 600)
+
+
+
+
+plot.beta <- filter(plot.data, variant == "Beta")
+beta <- ggplot(data = plot.beta, aes(x = date, y = count, color = "line")) +
+            geom_line(size = 1.2) +
+            scale_color_manual(values = "#006699")+
+            theme_bw() +
+            theme(legend.position = "none")+
+            labs(x = NULL, y = NULL) +
+            theme(aspect.ratio = 1/7)+
+            theme(axis.title.y = element_text(angle = 0, vjust = 0.5),
+                  axis.text.y=element_blank(),
+                  axis.ticks.y=element_blank())+
+            scale_x_date(date_labels = "%Y",
+                         limits = as.Date(c("2019-12-01", "2023-05-01")),
+                         breaks = as.Date(c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01")))+
+            theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+ggsave(beta, file = "beta.png", width = 6, height = 1, units = "in", dpi = 600)
+
+
+plot.gamma <- filter(plot.data, variant == "Gamma")
+gamma <- ggplot(data = plot.gamma, aes(x = date, y = count, color = "line")) +
+            geom_line(size = 1.2) +
+            scale_color_manual(values = "#FF6600")+
+            theme_bw() +
+            theme(legend.position = "none")+
+            labs(x = NULL, y = NULL) +
+            theme(aspect.ratio = 1/7)+
+            theme(axis.title.y = element_text(angle = 0, vjust = 0.5),
+                  axis.text.y=element_blank(),
+                  axis.ticks.y=element_blank())+
+            scale_x_date(date_labels = "%Y",
+                         limits = as.Date(c("2019-12-01", "2023-05-01")),
+                         breaks = as.Date(c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01")))+
+            theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+ggsave(gamma, file = "gamma.png", width = 6, height = 1, units = "in", dpi = 600)
+
+
+
+plot.lambda <- filter(plot.data, variant == "Lambda")
+lambda <- ggplot(data = plot.lambda, aes(x = date, y = count, color = "line")) +
+            geom_line(size = 1.2) +
+            scale_color_manual(values = "#FFCC00")+
+            theme_bw() +
+            theme(legend.position = "none")+
+            labs(x = NULL, y = NULL) +
+            theme(aspect.ratio = 1/7)+
+            theme(axis.title.y = element_text(angle = 0, vjust = 0.5),
+                  axis.text.y=element_blank(),
+                  axis.ticks.y=element_blank())+
+            scale_x_date(date_labels = "%Y",
+                         limits = as.Date(c("2019-12-01", "2023-05-01")),
+                         breaks = as.Date(c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01")))+
+            theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+ggsave(lambda, file = "lambda.png", width = 6, height = 1, units = "in", dpi = 600)
+
+
+plot.delta <- filter(plot.data, variant == "Delta")
+delta <- ggplot(data = plot.delta, aes(x = date, y = count, color = "line")) +
+            geom_line(size = 1.2) +
+            scale_color_manual(values = "#990066")+
+            theme_bw() +
+            theme(legend.position = "none")+
+            labs(x = NULL, y = NULL) +
+            theme(aspect.ratio = 1/7)+
+            theme(axis.title.y = element_text(angle = 0, vjust = 0.5),
+                  axis.text.y=element_blank(),
+                  axis.ticks.y=element_blank())+
+            scale_x_date(date_labels = "%Y",
+                         limits = as.Date(c("2019-12-01", "2023-05-01")),
+                         breaks = as.Date(c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01")))+
+            theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+ggsave(delta, file = "delta.png", width = 6, height = 1, units = "in", dpi = 600)
+
+
+
+
+plot.omicron <- filter(plot.data, variant == "Omicron")
+omicron <- ggplot(data = plot.omicron, aes(x = date, y = count, color = "line")) +
+            geom_line(size = 1.2) +
+            scale_color_manual(values = "#FF006F")+
+            theme_bw() +
+            theme(legend.position = "none")+
+            labs(x = "Date", y = NULL) +
+            theme(aspect.ratio = 1/7)+
+            theme(axis.title.y = element_text(angle = 0, vjust = 0.5),
+                  axis.text.y=element_blank(),
+                  axis.ticks.y=element_blank())+
+            scale_x_date(date_labels = "%Y",
+                         limits = as.Date(c("2019-12-01", "2023-05-01")),
+                         breaks = as.Date(c("2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01")))
+
+ggsave(omicron, file = "omicron.png", width = 6, height = 1.5, units = "in", dpi = 600)
+
+
+
+
+write.csv(plot.data, file = "VOC_submission_data.csv")
+
+```
+
+
+
+
