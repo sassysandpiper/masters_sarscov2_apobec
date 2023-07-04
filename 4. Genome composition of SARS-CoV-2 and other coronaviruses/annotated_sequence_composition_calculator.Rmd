@@ -1,0 +1,585 @@
+---
+title: "sequence_composition_calculator"
+output: html_document
+date: "2023-05-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+
+
+```
+
+
+
+MANDATORY DATA HANDLING
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#######################################################################################################
+DATA HANDLING TO LOAD SEQUENCES, MAKE CONSENSUS, ETC.
+#######################################################################################################
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Same across all analysis files
+
+```{r}
+
+################################################################################
+#STEP 1: READING SEQUENCES IN FROM FASTA FORMAT INTO DATA FRAME FOR ANALYSIS#
+################################################################################
+
+
+# Read in the file
+# readLines() creates a variable where each element contains a string for each line of the file
+
+
+#PLEASE ENTER THE FILE PATH OF THE SEQUENCE FILE HERE
+file_path <- "C:/Users/1044832/Desktop/aligned_clade/with RaT13G_all_clades_no_gaps_aligned_with_dates.fasta"
+lines <- readLines(file_path)
+
+
+#Initialize empty vectors for names and sequences
+#Vectors need to be initialized prior to using in a loop
+names_list <- c()
+sequences_list <- c()
+
+#Initialize new variables to hold the current names and sequence before adding them to the list
+current_name <- ""
+current_sequence <- ""
+
+#names_list and current_name are initialised differently because current_name only needs to hold one name at a time (hence only needs to be a string) while all current_names will be added to names_list (hence it needs to be a character vector to hold multiple strings)
+
+
+# Parse the lines
+for (line in lines) { # goes through all the lines one by one 
+  if (substr(line, 1, 1) == ">") { #substr separates out the part of the string that is specified, if first character of line is equal to > (a names line), then
+    
+    # New name, save previous sequence
+    if (current_name != "") {
+      names_list <- c(names_list, current_name)
+      sequences_list <- c(sequences_list, current_sequence)
+    }
+    # Start new sequence with this name
+    current_name <- gsub('>', '', line) # removing >
+    current_sequence <- ""
+  } else {
+    # Add to current sequence
+    current_sequence <- paste(current_sequence, line, sep="")
+  }
+}
+
+# Save the last name and sequence
+names_list <- c(names_list, current_name)
+sequences_list <- c(sequences_list, current_sequence)
+
+# Create a data frame with the name and sequence information
+df <- data.frame(name = names_list, sequence = sequences_list)
+
+# Cleaning up
+# Removing unwanted variables
+rm(list = c("current_name", "current_sequence", "line", "lines", "names_list", "sequences_list"))
+# Garbage Collection = removing temporary memory
+invisible(gc())
+
+
+```
+
+
+```{r}
+
+################################################################################
+#STEP 2: SEPARATING OUT EACH POSITION INTO ITS OWN ROW#
+################################################################################
+
+#identify the max length of the sequences
+max_length <- max(str_length(df$sequence))
+
+#Making all the sequences the same length for unnest_longer(), if sequences are shorter than the max length, add enough - at the end to make them equivalent
+df$sequence <- str_pad(df$sequence, max_length, "right", "-")
+
+#Separating each nucleotide
+df$split <- strsplit(df$sequence, split="")
+
+#Removing sequence column as its no longer needed
+df.min <- subset(df, select = c("name", "split"))
+
+#Making species names the column names
+df.wide <- pivot_wider(df.min, names_from = name, values_from = split)
+
+#Seperating the list into individual rows
+data <- df.wide %>% unnest_longer(c(colnames(df.wide)))
+
+#Cleaning environment
+rm(list=setdiff(ls(), c("data", "df", "file_path")))
+invisible(gc())
+
+
+```
+
+
+```{r}
+################################################################################
+#STEP 3: ADDING CODON POSITION INFORMATION#
+################################################################################
+
+#According to NCBI gene reference sequence for SARS-CoV-2, the open reading frame for SARS-CoV-2 WT starts at the second codon position.
+
+#Adding position row into data data frame
+data$position <- seq_along(1:nrow(data))
+
+#Adding codon position row into data data frame
+data$codon_position <- c("-", rep(1:3, length.out = nrow(data)-1))
+
+#Adding functional ORF annotations into genome
+data$orf <- NA
+data$orf[266:21555] <- "ORF1ab"
+data$orf[21563:25384] <- "S"
+data$orf[25393:26220] <- "ORF3a"
+data$orf[25765:26220] <- "ORF3b"
+data$orf[26245:26472] <- "E"
+data$orf[26523:27191] <- "M"
+data$orf[27202:27387] <- "ORF6"
+data$orf[27394:27759] <- "ORF7a"
+data$orf[27894:28259] <- "ORF8"
+data$orf[28274:28283] <- "N"
+data$orf[28284:28577] <- "N/ORF9b"
+data$orf[28578:28733] <- "N"
+data$orf[28734:28955] <- "N/ORF9c"
+data$orf[28956:29533] <- "N"
+data$orf[29558:29674] <- "ORF10"
+
+#Adding "n/a" tag to every position out of an open reading frame
+data$orf[is.na(data$orf)] <- "n/a"
+
+```
+
+
+
+
+
+
+
+
+
+```{r}
+
+################################################################################
+#STEP 4: CALCULATING NUCLEOTIDE COMPOSITION#
+################################################################################
+
+#####Calculating composition regardless of codon position, for each sequence#####
+
+#Creating a new data frame to hold nucleotide counts
+base_count <- data.frame()
+bases <- c("A", "C", "G", "T")
+
+#Creating a frequency table of base occurrence for each sequence and pasting into the "base_count" data frame
+for (i in colnames(data)[1:(ncol(data)-3)]) {
+  freq_table <- table(data[[i]]) #create frequency table for each sequence
+  freq_df <- data.frame(seq_name = paste(i), base = names(freq_table), count = as.numeric(freq_table)) #make a temp data frame to store all counts
+  base_count <- rbind(base_count, freq_df) #add all data in temp data frame into base_count data frame where all data is compiled for all sequences
+}
+
+
+#create a list of all the sequence names
+all_seq_names <- unique(base_count$seq_name)
+#initiate nucleotide composition data frame
+nucleotide_composition <- data.frame()
+
+
+
+#for loop to loop through all sequences and calculate nucleotide composition for each sequence
+for (i in all_seq_names) {
+  tmp_rows <- base_count[base_count[,1] == i,] #extract all rows that belong to a sequence
+  base_rows <- tmp_rows[tolower(tmp_rows[, 2]) %in% tolower(bases), ] #filter only for rows that contain counts of A, C, G, T (excludes - or N)
+  sum <- sum(base_rows[,3])
+  a_ratio <- base_rows[1, 3]/sum
+  c_ratio <- base_rows[2, 3]/sum
+  g_ratio <- base_rows[3, 3]/sum
+  t_ratio <- base_rows[4, 3]/sum
+  current_seq_name <- paste(i)
+  tmp_df <- data.frame(cbind(current_seq_name, a_ratio, c_ratio, g_ratio, t_ratio)) #temp data frame to store all counts
+  nucleotide_composition <- rbind(nucleotide_composition, tmp_df) #merge
+}
+
+
+#convert the ratio columns into numeric columns
+nucleotide_composition$a_ratio <- as.numeric(nucleotide_composition$a_ratio)
+nucleotide_composition$c_ratio <- as.numeric(nucleotide_composition$c_ratio)
+nucleotide_composition$g_ratio <- as.numeric(nucleotide_composition$g_ratio)
+nucleotide_composition$t_ratio <- as.numeric(nucleotide_composition$t_ratio)
+
+#recognise the data id from the date path using regex and add the date to a new column in the data frame
+nucleotide_composition$date <- str_extract(nucleotide_composition$current_seq_name, "\\d{4}-\\d{2}-\\d{2}")
+
+
+
+rm(list=setdiff(ls(), c("data", "nucleotide_composition")))
+invisible(gc())
+
+```
+
+
+
+
+
+
+
+```{r}
+################################################################################
+#LINEAR MODELLING & PLOTTING - WITHOUT REFERENCES#
+################################################################################
+#Changing ratios to percentages
+nucleotide_composition[, 2:5] <- nucleotide_composition[, 2:5] * 100
+
+#Assigning plot data to first codon position
+plot.data <- nucleotide_composition[-1, ]
+
+#Specifying date column is date format
+plot.data$date <- as.Date(plot.data$date)
+
+#For labeling purposes
+year <- 2019
+month <- 11
+day <- 20
+x_coord <- as.Date(paste(year, month, day, sep = "-"))
+
+#For Pearson's correlation tests: Change date column from date format to numeric format to allow calculations of statistical tests. Numeric format assigns each date a number - with each increasing day, the number increases by 1
+plot.data$date_numeric <- as.numeric(plot.data$date)
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~#
+#plotting the C ratios#
+#~~~~~~~~~~~~~~~~~~~~~#
+
+#Linear regression for c_ratio against date
+regression <- lm(plot.data$c_ratio ~ plot.data$date)
+slope <- regression$coefficients[2]
+intercept <- regression$coefficients[1]
+
+#Pearson's correlation test
+cortest_c <- cor.test(plot.data$date_numeric, plot.data$c_ratio, method = "pearson")
+r <- cortest_c$estimate
+
+#Scatter plot with regression line
+ggplot(plot.data, aes(x = date, y = c_ratio))+
+  geom_jitter(alpha = 0.3, size = 0.5, color = "#006699")+
+  theme_bw()+
+  coord_cartesian(ylim = c(18.1, 18.6))+
+  scale_y_continuous(breaks = seq(18.1, 18.6, by = 0.1)) +
+  theme(aspect.ratio = 1/2)+
+  labs(y = "C Content in Genome (%)", x = "Sample Collection Date")+
+  geom_text(x = x_coord, y = 18.60, label = paste0("m = ", sprintf("%.3e", slope)), color = "black", hjust = 0, size = 6)+
+  geom_text(x = x_coord, y = 18.56, label = paste0("r = ", sprintf("%.3f", r)), color = "black", hjust = 0, size = 6)+
+  ggtitle("%C")+
+  theme(plot.title = element_text(size = 16))+
+  theme(plot.title = element_text(hjust = 0))+
+  geom_abline(intercept = intercept, slope = slope, color = "black")+
+  theme(plot.margin = margin(t = 1, b = 1, l = 1.25, r = 1.25))+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 13))
+
+
+#Save plot
+ggsave(plot = last_plot(), file = "C_content_global_n11000.png", 
+       width = 9.5, height = 5, units = "in", dpi = 600)
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~#
+#plotting the T ratios#
+#~~~~~~~~~~~~~~~~~~~~~#
+
+#Linear regression for t_ratio against date
+regression <- lm(plot.data$t_ratio ~ plot.data$date)
+slope <- regression$coefficients[2]
+intercept <- regression$coefficients[1]
+
+#Pearson's correlation test
+cortest_t <- cor.test(plot.data$date_numeric, plot.data$t_ratio, method = "pearson")
+r <- cortest_t$estimate
+
+#Scatter plot with regression line
+ggplot(plot.data, aes(x = date, y = t_ratio))+
+  geom_jitter(alpha = 0.3, size = 0.5, color = "#FF006F")+
+  theme_bw()+
+  coord_cartesian(ylim = c(31.9, 32.4))+
+  scale_y_continuous(breaks = seq(31.9, 32.4, by = 0.1)) +
+  theme(aspect.ratio = 1/2)+
+  labs(y = "T Content in Genome (%)", x = "Sample Collection Date")+
+  geom_text(x = x_coord, y = 32.4, label = paste0("m = ", sprintf("%.3e", slope)), color = "black", hjust = 0, size = 6)+
+  geom_text(x = x_coord, y = 32.36, label = paste0("r = ", sprintf("%.3f", r)), color = "black", hjust = 0, size = 6)+
+  ggtitle("%T")+
+  theme(plot.title = element_text(size = 16))+
+  theme(plot.title = element_text(hjust = 0))+
+  geom_abline(intercept = intercept, slope = slope, color = "black")+
+  theme(plot.margin = margin(t = 1, b = 1, l = 1.25, r = 1.25))+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 13))
+
+
+
+#Save plot
+ggsave(plot = last_plot(), file = "T_content_global_n11000.png", 
+       width = 9.5, height = 5, units = "in", dpi = 600)
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~#
+#plotting the G ratios#
+#~~~~~~~~~~~~~~~~~~~~~#
+
+#Linear regression for g_ratio against date
+regression <- lm(plot.data$g_ratio ~ plot.data$date)
+slope <- regression$coefficients[2]
+intercept <- regression$coefficients[1]
+
+#Pearson's correlation test
+cortest_g <- cor.test(plot.data$date_numeric, plot.data$g_ratio, method = "pearson")
+r <- cortest_g$estimate
+
+#Scatter plot with regression line
+ggplot(plot.data, aes(x = date, y = g_ratio))+
+  geom_jitter(alpha = 0.3, size = 0.5, color = "#669900")+
+  theme_bw()+
+  coord_cartesian(ylim = c(19.4, 19.9))+
+  scale_y_continuous(breaks = seq(19.4, 19.9, by = 0.1)) +
+  theme(aspect.ratio = 1/2)+
+  labs(y = "G Content in Genome (%)", x = "Sample Collection Date")+
+  geom_text(x = x_coord, y = 19.9, label = paste0("m = ", sprintf("%.3e", slope)), color = "black", hjust = 0, size = 6)+
+  geom_text(x = x_coord, y = 19.86, label = paste0("r = ", sprintf("%.3f", r)), color = "black", hjust = 0, size = 6)+
+  ggtitle("%G")+
+  theme(plot.title = element_text(size = 16))+
+  theme(plot.title = element_text(hjust = 0))+
+  geom_abline(intercept = intercept, slope = slope, color = "black")+
+  theme(plot.margin = margin(t = 1, b = 1, l = 1.25, r = 1.25))+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 13))
+
+
+#Save plot
+ggsave(plot = last_plot(), file = "G_content_global_n11000_codonpos1.png", 
+       width = 9.5, height = 5, units = "in", dpi = 600)
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~#
+#plotting the A ratios#
+#~~~~~~~~~~~~~~~~~~~~~#
+
+#Linear regression for g_ratio against date
+regression <- lm(plot.data$a_ratio ~ plot.data$date)
+slope <- regression$coefficients[2]
+intercept <- regression$coefficients[1]
+
+#Pearson's correlation test
+cortest_a <- cor.test(plot.data$date_numeric, plot.data$a_ratio, method = "pearson")
+r <- cortest_a$estimate
+
+#Scatter plot with regression line
+ggplot(plot.data, aes(x = date, y = a_ratio))+
+  geom_jitter(alpha = 0.3, size = 0.5, color = "#FF6600")+
+  theme_bw()+
+  coord_cartesian(ylim = c(29.6, 30.1))+
+  scale_y_continuous(breaks = seq(29.6, 30.1, by = 0.1)) +
+  theme(aspect.ratio = 1/2)+
+  labs(y = "A Content in Genome (%)", x = "Sample Collection Date")+
+  geom_text(x = x_coord, y = 30.1, label = paste0("m = ", sprintf("%.3e", slope)), color = "black", hjust = 0, size = 6)+
+  geom_text(x = x_coord, y = 30.06, label = paste0("r = ", sprintf("%.3f", r)), color = "black", hjust = 0, size = 6)+
+  ggtitle("%A")+
+  theme(plot.title = element_text(size = 16))+
+  theme(plot.title = element_text(hjust = 0))+
+  geom_abline(intercept = intercept, slope = slope, color = "black")+
+  theme(plot.margin = margin(t = 1, b = 1, l = 1.25, r = 1.25))+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 13))
+
+
+#Save plot
+ggsave(plot = last_plot(), file = "A_content_global_n11000_codonpos1.png", 
+       width = 9.5, height = 5, units = "in", dpi = 600)
+
+
+
+
+#Save the data used to make plots, etc.
+write.csv(plot.data, file = "nucleotide_comp_over_time.csv")
+
+cortestdf <- c("cortest_a", "cortest_c", "cortest_g", "cortest_t")
+
+for (df in cortestdf) {
+  currentdf <- get(df)
+  cor_data <- data.frame(
+    statistic = currentdf$statistic,
+    p_value = currentdf$p.value,
+    method = currentdf$method,
+    estimate = currentdf$estimate,
+    t_value = currentdf$statistic,
+    df = currentdf$parameter,
+    conf_interval = paste0("[", currentdf$conf.int[1], ", ", currentdf$conf.int[2], "]"),
+    correlation = currentdf$estimate
+  )
+
+  file_path <- paste0(df, "_results.csv")  # Create a unique file name for each result
+  write.csv(cor_data, file = file_path, row.names = FALSE)
+}
+```
+
+
+```{r}
+################################################################################
+#STATISTICAL TESTS#
+################################################################################
+
+#Change date column from date format to numeric format to allow calculations of statistical tests. Numeric format assigns each date a number - with each increasing day, the number increases by 1
+plot.data$date_numeric <- as.numeric(plot.data$date)
+
+#Pearson's correlation test for C ratio
+cortest_c <- cor.test(plot.data$date_numeric, plot.data$c_ratio, method = "pearson")
+cortest_c
+```
+#C ratio~date for first codon position
+p-value < 2.2e-16
+CI95 of the correlation coefficient [-0.7361419, -0.7185421]
+correlation coefficient = -0.7274616, moderate negative correlation
+
+
+```{r}
+#Pearson's correlation test for T ratio
+cortest_t <- cor.test(plot.data$date_numeric, plot.data$t_ratio, method = "pearson")
+cortest_t
+```
+#T ratio~date for first codon position
+p-value < 2.2e-16
+CI95 of the correlation coefficient [0.6887094, 0.7078575]
+correlation coefficient = 0.6984084, moderate positive correlation
+
+
+```{r}
+#Pearson's correlation test for G ratio
+cortest_g <- cor.test(plot.data$date_numeric, plot.data$g_ratio, method = "pearson")
+cortest_g
+```
+#G ratio~date for first codon position
+p-value < 2.2e-16
+CI95 of the correlation coefficient [-0.2841447, -0.2494300]
+correlation coefficient = -0.2668739, moderate negative correlation
+
+
+```{r}
+#Pearson's correlation test for A ratio
+cortest_a <- cor.test(plot.data$date_numeric, plot.data$a_ratio, method = "pearson")
+cortest_a
+```
+#A ratio~date for first codon position
+p-value < 2.2e-16
+CI95 of the correlation coefficient [0.07032735, 0.10740787]
+correlation coefficient = 0.08889841, very weak positive correlation
+
+
+
+
+
+
+
+```{r}
+################################################################################
+#LINEAR MODELLING & PLOTTING - WITH REFERENCES#
+################################################################################
+
+#Assigning plot data to first codon position
+plot.data <- nucleotide_composition[4:nrow(nucleotide_composition),]
+
+#Specifying date column is date format
+plot.data$date <- as.Date(plot.data$date)
+
+#Converting ratios to percent
+plot.data[, 2:5] <- plot.data[, 2:5] * 100
+nucleotide_composition[, 2:5] <- nucleotide_composition[, 2:5] * 100
+
+#~~~~~~~~~~~~~~~~~~~~~#
+#plotting the C ratios#
+#~~~~~~~~~~~~~~~~~~~~~#
+
+#Linear regression for c_ratio against date
+regression <- lm(plot.data$c_ratio ~ plot.data$date)
+slope <- regression$coefficients[2]
+intercept <- regression$coefficients[1]
+
+#Working out the intersection point between c_ratio of RaT13G and current slope
+x_coord <- (nucleotide_composition[2, 3]-intercept) / slope
+date_c <- as.Date(x_coord, origin = "1970-01-01")
+
+#Scatter plot with regression line
+ggplot(plot.data, aes(x = date, y = c_ratio)) +
+  geom_jitter(alpha = 0.3, size = 0.5, color = "#006699") +
+  theme_bw() +
+  coord_cartesian(ylim = c(18.1, 18.6)) +
+  scale_y_continuous(breaks = seq(18.1, 18.6, by = 0.1)) +
+  theme(aspect.ratio = 1/2) +
+  scale_x_date(limits = as.Date(c("2017-12-01", "2023-12-01"))) +
+  labs(y = "C Content in Genome (%)", x = "Sample Collection Date") +
+  ggtitle("%C") +
+  theme(plot.title = element_text(size = 16, hjust = 0)) +
+  geom_abline(intercept = intercept, slope = slope, color = "black") +
+  theme(plot.margin = margin(t = 1, b = 1, l = 1.25, r = 1.25)) +
+  geom_hline(yintercept = 18.44582, color = "red")+
+  geom_point(x = date_c, y = 18.44582, size = 4, shape = 17, color = "black")+
+  theme(axis.title = element_text(size = 14, face = "bold"))+
+  theme(axis.text = element_text(size = 13))
+
+
+
+#Save plot
+ggsave(plot = last_plot(), file = "C_RaT13G.png", 
+       width = 9.5, height = 5, units = "in", dpi = 600)
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~#
+#plotting the T ratios#
+#~~~~~~~~~~~~~~~~~~~~~#
+
+#Linear regression for c_ratio against date
+regression <- lm(plot.data$t_ratio ~ plot.data$date)
+slope <- regression$coefficients[2]
+intercept <- regression$coefficients[1]
+
+#Working out the intersection point between c_ratio of RaT13G and current slope
+x_coord <- (nucleotide_composition[2, 5]-intercept) / slope
+date_t <- as.Date(x_coord, origin = "1970-01-01")
+
+#Scatter plot with regression line
+ggplot(plot.data, aes(x = date, y = t_ratio))+
+  geom_jitter(alpha = 0.3, size = 0.5, color = "#FF006F")+
+  theme_bw()+
+  coord_cartesian(ylim = c(31.9, 32.4))+
+  scale_y_continuous(breaks = seq(31.9, 32.4, by = 0.1)) +
+  scale_x_date(limits = as.Date(c("2017-12-01", "2023-12-01"))) +
+  theme(aspect.ratio = 1/2)+
+  labs(y = "T Content in Genome (%)", x = "Sample Collection Date")+
+  ggtitle("%T")+
+  theme(plot.title = element_text(size = 16))+
+  theme(plot.title = element_text(hjust = 0))+
+  geom_abline(intercept = intercept, slope = slope, color = "black")+
+  theme(plot.margin = margin(t = 1, b = 1, l = 1.25, r = 1.25))+
+  geom_hline(yintercept = 32.08508, color = "red")+
+  geom_point(x = date_t, y = 32.08508, size = 4, shape = 17, color = "black")+
+  theme(axis.title = element_text(size = 14, face = "bold"))+
+  theme(axis.text = element_text(size = 13))
+
+
+#Save plot
+ggsave(plot = last_plot(), file = "T_RaT13G.png", 
+       width = 9.5, height = 5, units = "in", dpi = 600)
+
+
+```
+
+
+
+
+
+

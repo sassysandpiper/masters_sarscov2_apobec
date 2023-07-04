@@ -1,0 +1,539 @@
+---
+title: "base_count"
+output: html_document
+date: "2023-04-22"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+install.packages("ggrepel")
+
+
+library(tidyverse)
+library(readxl)
+library(ggrepel)
+
+```
+
+#Finding Directories and Files
+```{r}
+
+
+
+#Please specify the directory you wish to use
+dir <- "C:/Users/1044832/Desktop/Coronavirus datasets/aligned"
+
+
+#Creating an output directory
+if (!dir.exists(paste(dir, "/Data", sep = ""))) {
+  dir.create(paste(dir, "/Data", sep = ""))
+}
+
+output_dir <- paste(dir, "/Data", sep = "")
+
+
+
+#list all the .txt files in the specified directory(ies)
+files <- list.files(path = dir, pattern =".fasta")
+
+```
+
+
+
+
+# Big ol for loop
+
+```{r}
+
+# Initializing data frame for the loop
+nucleotide_composition_mean <- data.frame(data_id = NA , a_ratio_mean = NA, c_ratio_mean = NA, g_ratio_mean = NA, t_ratio_mean = NA)
+
+
+################################################################################
+#STEP 0: Looping through every sequence file in the directory#
+################################################################################
+
+for (file in files){
+  
+  ################################################################################
+  #STEP 1: READING SEQUENCES IN FROM FASTA FORMAT INTO DATA FRAME FOR ANALYSIS#
+  ################################################################################
+
+  # Read in the file
+  # readLines() creates a variable where each element contains a string for each line of the file
+  lines <- readLines(paste(dir, "/", file, sep = ""))
+  
+  # Initialize empty vectors for names and sequences
+  # Vectors need to be initialized prior to using in a loop
+  names_list <- c()
+  sequences_list <- c()
+  
+  # Initialize new variables to hold the current names and sequence before adding them to the list
+  current_name <- ""
+  current_sequence <- ""
+  
+  #names_list and current_name are initialised differently because current_name only needs to hold one name at a time (hence only needs to be a string) while all current_names will be added to names_list (hence it needs to be a character vector to hold multiple strings)
+
+  
+  # Parse the lines
+  for (line in lines) { # goes through all the lines one by one 
+    if (substr(line, 1, 1) == ">") { #substr separates out the part of the string that is specified, if first character of line is equal to > (a names line), then
+      
+      # New name, save previous sequence
+      if (current_name != "") {
+        names_list <- c(names_list, current_name)
+        current_sequence <- toupper(current_sequence)
+        sequences_list <- c(sequences_list, current_sequence)
+      }
+      # Start new sequence with this name
+      current_name <- gsub('>', '', line) # removing >
+      current_sequence <- ""
+    } else {
+      # Add to current sequence
+      current_sequence <- paste(current_sequence, line, sep="")
+    }
+  }
+  
+  # Save the last name and sequence
+  names_list <- c(names_list, current_name)
+  current_sequence <- toupper(current_sequence)
+  sequences_list <- c(sequences_list, current_sequence)
+  
+  # Create a data frame with the name and sequence information
+  df <- data.frame(name = names_list, sequence = sequences_list)
+  
+  # Cleaning up
+  # Removing unwanted variables
+  rm(list = c("current_name", "current_sequence", "line", "lines", "names_list", "sequences_list"))
+  # Garbage Collection = removing temporary memory
+  gc()
+  
+  ################################################################################
+  #STEP 2: SEPARATING OUT EACH POSITION INTO ITS OWN ROW#
+  ################################################################################
+  
+  # Making all the sequences the same length for unnest_longer()
+  # If sequences are shorter than the max length, add enough - at the end to make them equivalent
+  
+  # get the maximum length of the strings in the sequence column
+  max_length <- max(str_length(df$sequence))
+
+  # extend the strings by adding dashes to the end
+  df$sequence <- str_pad(df$sequence, max_length, "right", "-")
+
+  # Separating each nucleotide
+  df$split <- strsplit(df$sequence, split="")
+  
+  # Removing sequence column as its no longer needed
+  df.min <- subset(df, select = c("name", "split"))
+  
+  # Making species names the column names
+  df.wide <- pivot_wider(df.min, names_from = name, values_from = split)
+  
+  # Separating the list into individual rows
+  data <- df.wide %>% unnest_longer(c(colnames(df.wide)))
+  
+  # Cleaning environment
+  rm(list=setdiff(ls(), c("data", "df", "file", "files", "dir", "nucleotide_composition_mean", "output_dir")))
+  invisible(gc())
+
+
+  ################################################################################
+  #STEP 3: CALCULATING NUCLEOTIDE COMPOSITION#
+  ################################################################################
+  
+  
+  #creating a new data frame to hold nucleotide counts
+  
+  base_count <- data.frame()
+  bases <- c("A", "C", "G", "T")
+  
+  for (i in colnames(data)) {
+    freq_table <- table(data[[i]])
+    freq_df <- data.frame(seq_name = paste(i), base = names(freq_table), count = as.numeric(freq_table))
+    base_count <- rbind(base_count, freq_df)
+  }
+  
+  
+  #create a list of all the sequence names
+  all_seq_names <- unique(base_count$seq_name)
+  #initiate nucleotide composition data frame
+  nucleotide_composition <- data.frame()
+  
+  #for loop to loop through all sequences and calculate nucleotide composition for each sequence
+  for (i in all_seq_names) {
+    tmp_rows <- base_count[base_count[,1] == i,]
+    base_rows <- tmp_rows[tmp_rows[,2] %in% bases,]
+    sum <- sum(base_rows[,3])
+    a_ratio <- base_rows[1, 3]/sum
+    c_ratio <- base_rows[2, 3]/sum
+    g_ratio <- base_rows[3, 3]/sum
+    t_ratio <- base_rows[4, 3]/sum
+    current_seq_name <- paste(i)
+    tmp_df <- data.frame(cbind(current_seq_name, a_ratio, c_ratio, g_ratio, t_ratio))
+    nucleotide_composition <- rbind(nucleotide_composition, tmp_df)
+  }
+  
+  # extracting WT row into separate df and removing it from the main df 
+  wt_df <- data.frame(nucleotide_composition[1, ])
+  nucleotide_composition <- nucleotide_composition[-1,]
+  
+  #convert the ratio columns into numeric columns
+  nucleotide_composition$a_ratio <- as.numeric(nucleotide_composition$a_ratio)
+  nucleotide_composition$c_ratio <- as.numeric(nucleotide_composition$c_ratio)
+  nucleotide_composition$g_ratio <- as.numeric(nucleotide_composition$g_ratio)
+  nucleotide_composition$t_ratio <- as.numeric(nucleotide_composition$t_ratio)
+  
+  nucleotide_composition$date <- str_extract(nucleotide_composition$current_seq_name, "\\d{4}-\\d{2}-\\d{2}")
+  
+  # Cleaning Environment
+  #rm(setdiff(list = c("file")))
+  
+  # Getting clade name
+  clade <- sub("^(.*?)\\.mafft\\.fasta$", "\\1", file)
+  assign(paste(clade, "_nucleotide_composition", sep = ""), nucleotide_composition)
+  write.csv(nucleotide_composition, file = paste0(output_dir, "/", paste0(clade, "_nucleotide_composition.csv")))
+  
+  
+  ################################################################################
+  #STEP 4: Means#
+  ################################################################################
+  
+
+  #recognise the data id from the file path using regex
+  data_id <- data.frame(data_id = clade)
+
+  #find mean
+  tmp_comp_means <- nucleotide_composition %>% 
+                      summarize(a_ratio_mean = mean(a_ratio), 
+                                c_ratio_mean = mean(c_ratio), 
+                                g_ratio_mean = mean(g_ratio), 
+                                t_ratio_mean = mean(t_ratio))
+
+  tmp_comp_means <- cbind(data_id, tmp_comp_means)
+  
+  
+  nucleotide_composition_mean <- rbind(nucleotide_composition_mean, tmp_comp_means)
+  
+  
+  #rm(list=setdiff(ls(), c("data", "df", "file_path", "nucleotide_composition", "nucleotide_composition_mean", "wt_df", "output_dir")))
+
+  
+}
+
+
+#Adding in WT
+colnames(wt_df) <- c("data_id", "a_ratio_mean", "c_ratio_mean", "g_ratio_mean", "t_ratio_mean")
+nucleotide_composition_mean <- rbind(wt_df, nucleotide_composition_mean)
+nucleotide_composition_mean <- na.omit(nucleotide_composition_mean)
+
+#writing data into csv file
+write.csv(nucleotide_composition_mean, file = paste0(output_dir, "/nucleotide_composition_mean.csv"))
+
+
+#making all values in data frame numeric
+nucleotide_composition_mean$a_ratio_mean <- as.numeric(nucleotide_composition_mean$a_ratio_mean)
+nucleotide_composition_mean$c_ratio_mean <- as.numeric(nucleotide_composition_mean$c_ratio_mean)
+nucleotide_composition_mean$g_ratio_mean <- as.numeric(nucleotide_composition_mean$g_ratio_mean)
+nucleotide_composition_mean$t_ratio_mean <- as.numeric(nucleotide_composition_mean$t_ratio_mean)
+
+
+#cleaning up environment
+rm(list = c("base_count", "base_rows", "data", "data_id", "df", "freq_df", "nucleotide_composition", "tmp_comp_means", "tmp_df", "tmp_rows", "wt_df", "a_ratio", "all_seq_names", "bases", "c_ratio", "current_seq_name", "dir", "file", "files", "freq_table", "g_ratio", "i", "sum", "t_ratio", "clade"))
+gc()
+
+```
+
+```{r}
+#####################################################################################
+#DATA CLEANUP#
+#####################################################################################
+nucleotide_composition_mean <- nucleotide_composition_mean[-1, ]
+nucleotide_composition_mean <- rbind(nucleotide_composition_mean[1:4, ], nucleotide_composition_mean[6:nrow(nucleotide_composition_mean), ])
+nucleotide_composition_mean[7, 1] <- "Human_MERS_CoV"
+
+write.csv(nucleotide_composition_mean, file = "coronaviruses_nucleotide_composition_mean.csv", row.names = FALSE)
+
+
+
+```
+
+
+
+
+```{r}
+#####################################################################################
+#Analysis 1: PLOTTING MEAN NUCLEOTIDE COMPOSITION RATIOS FOR ALL CLADES ON BOX PLOTS#
+#####################################################################################
+
+#Read in clade data
+nucleotide_composition_mean <- read.csv("clades+coronavirus_nucleotide_composition_mean.csv")
+
+
+
+plot_data <- nucleotide_composition_mean
+plot_data[1,1] <- "SARS-CoV-2"
+plot_data[, 3:5] <- plot_data[, 3:5] * 100
+plot_data$label_condition <- factor(plot_data$label_condition, levels = c("TRUE", "FALSE"))
+
+
+ggplot(plot_data, aes(x = t_ratio_mean, y = c_ratio_mean, color = type, fill = type)) +
+  theme_bw() +
+  geom_point(size = 4, shape = 21, color = "black") +
+  geom_label_repel(data = subset(plot_data, label_condition == "TRUE"), 
+                   aes(label = data_id), color = "black", fill = "white",
+                   box.padding = 0.5, point.padding = 0.5, min.segment.length = 0, max.time = 1) +
+  labs(y = "C Content in Genome (%)", x = "U Content in Genome (%)", fill = "Virus type")+
+  theme(axis.title = element_text(size = 14, face = "bold"))+
+  theme(axis.text = element_text(size = 13))
+
+
+ggsave(last_plot(), file = "coronaviruses_genome_content.png", width = 8, height = 6, units = "in", dpi = 300)
+ 
+```
+
+
+
+
+
+```{r}
+
+plot.data3 <- plot.data2
+
+ggplot(plot.data2, aes(x = variant, y = t_ratio, fill = variant))+
+  geom_boxplot(outlier.shape = NA)+
+  theme_bw()+
+  labs(y = "%U", x = NULL)+
+  scale_x_discrete(limits = c("L", "S", "V", "O", "G", "GV", "GH", "GR", "GRY", "GK", "GRA"))+
+  scale_fill_manual(values = palettet, breaks = c("L", "S", "V", "O", "G", "GV", "GH", "GR", "GRY", "GK", "GRA"))+
+  geom_hline(yintercept = 32.09662, linetype = "dashed", color = "red")+
+  coord_cartesian(ylim = c(32, 32.30))+
+  theme(axis.text.y = element_text(size = 13))+
+  theme(axis.text.x = element_text(size = 13, face = "bold"))+
+  theme(axis.title.y = element_text(size = 14, face = "bold"))
+
+
+ggsave(plot = last_plot(), filename = "T by clade.png", width = 8, height = 4, units = "in", dpi = 600)
+
+```
+
+```{r}
+plot.data4 <- plot.data2
+
+ggplot(plot.data4, aes(x = variant, y = g_ratio, fill = variant))+
+  geom_boxplot(outlier.shape = NA)+
+  theme_bw()+
+  labs(y = "%G", x = NULL)+
+  scale_x_discrete(limits = c("L", "S", "V", "O", "G", "GV", "GH", "GR", "GRY", "GK", "GRA"))+
+  scale_fill_manual(values = paletteg, breaks = c("L", "S", "V", "O", "G", "GV", "GH", "GR", "GRY", "GK", "GRA"))+
+  geom_hline(yintercept = 19.61460, linetype = "dashed", color = "red")+
+  coord_cartesian(ylim = c(19.50, 19.8))+
+  theme(axis.text.y = element_text(size = 13))+
+  theme(axis.text.x = element_text(size = 13, face = "bold"))+
+  theme(axis.title.y = element_text(size = 14, face = "bold"))
+
+
+ggsave(plot = last_plot(), filename = "G by clade.png", width = 8, height = 4, units = "in", dpi = 600)
+```
+
+```{r}
+plot.data5 <- plot.data2
+
+ggplot(plot.data4, aes(x = variant, y = a_ratio, fill = variant))+
+  geom_boxplot(outlier.shape = NA)+
+  theme_bw()+
+  labs(y = "%A", x = NULL)+
+  scale_x_discrete(limits = c("L", "S", "V", "O", "G", "GV", "GH", "GR", "GRY", "GK", "GRA"))+
+  scale_fill_manual(values = palettea, breaks = c("L", "S", "V", "O", "G", "GV", "GH", "GR", "GRY", "GK", "GRA"))+
+  geom_hline(yintercept = 29.91536, linetype = "dashed", color = "red")+
+  coord_cartesian(ylim = c(29.70, 30.00))+
+  theme(axis.text.y = element_text(size = 13))+
+  theme(axis.text.x = element_text(size = 13, face = "bold"))+
+  theme(axis.title.y = element_text(size = 14, face = "bold"))
+
+
+ggsave(plot = last_plot(), filename = "A by clade.png", width = 8, height = 4, units = "in", dpi = 600)
+```
+
+```{r}
+write.csv(plot.data2a, file = "summary_genome_comp_means_clades.csv", row.names = FALSE)
+
+t.test(L_nucleotide_composition$c_ratio, mu = 0.1837342)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+################################################################################################################
+#ANALYSIS 2: LINEAR MODELING OF NUCLEOTIDE CHANGE IN EACH CLADE, PLOTTING NUCLEOTIDE CHANGE SLOPES ON BAR CHART#
+################################################################################################################
+
+#Loading in all files
+all_files <- list.files(output_dir, pattern = "\\.csv$", full.names = TRUE)
+
+
+for (file in all_files) {
+  # Extract the file name without extension
+  file_name <- tools::file_path_sans_ext(basename(file))
+  
+  # Read the Excel file into a dataframe
+  dataframe <- read_csv(file)
+  
+  # Assign the dataframe to a variable named after the file name
+  assign(file_name, dataframe)
+}
+
+#cleaning up the environment 
+rm(list = c("dataframe", "all_files", "file", "file_name"))
+invisible(gc())
+
+
+
+#Doing linear regression analysis on all files
+# Create a list of data frames
+df_list <- setNames(list(G_nucleotide_composition, GH_nucleotide_composition, GK_nucleotide_composition, GR_nucleotide_composition, GRA_nucleotide_composition, GRY_nucleotide_composition, GV_nucleotide_composition, L_nucleotide_composition, O_nucleotide_composition, S_nucleotide_composition, V_nucleotide_composition),
+                    c("G_nucleotide_composition", "GH_nucleotide_composition", "GK_nucleotide_composition", "GR_nucleotide_composition", "GRA_nucleotide_composition", "GRY_nucleotide_composition", "GV_nucleotide_composition", "L_nucleotide_composition", "O_nucleotide_composition", "S_nucleotide_composition", "V_nucleotide_composition"))
+
+# Initialize an empty list to store the results
+lm_results <- list()
+
+# Loop through each data frame in the list
+for (i in seq_along(df_list)) {
+  # Perform linear regression analysis
+  lm_a_ratio <- lm(a_ratio ~ date, data = df_list[[i]])
+  lm_c_ratio <- lm(c_ratio ~ date, data = df_list[[i]])
+  lm_t_ratio <- lm(t_ratio ~ date, data = df_list[[i]])
+  lm_g_ratio <- lm(g_ratio ~ date, data = df_list[[i]])
+
+  # Perform Pearson's correlation test
+  cor_a_ratio <- cor.test(df_list[[i]]$a_ratio, as.numeric(df_list[[i]]$date))
+  cor_c_ratio <- cor.test(df_list[[i]]$c_ratio, as.numeric(df_list[[i]]$date))
+  cor_t_ratio <- cor.test(df_list[[i]]$t_ratio, as.numeric(df_list[[i]]$date))
+  cor_g_ratio <- cor.test(df_list[[i]]$g_ratio, as.numeric(df_list[[i]]$date))
+
+  # Extract the required values and create a data frame
+  result_row <- data.frame(
+    df = names(df_list[i]),
+    a_slope = coef(lm_a_ratio)[2],
+    a_intercept = coef(lm_a_ratio)[1],
+    c_slope = coef(lm_c_ratio)[2],
+    c_intercept = coef(lm_c_ratio)[1],
+    t_slope = coef(lm_t_ratio)[2],
+    t_intercept = coef(lm_t_ratio)[1],
+    g_slope = coef(lm_g_ratio)[2],
+    g_intercept = coef(lm_g_ratio)[1],
+    a_r = cor_a_ratio$estimate,
+    a_rcilower = unlist(cor_a_ratio$conf.int[1]),
+    a_rciupper = unlist(cor_a_ratio$conf.int[2]),
+    c_r = cor_c_ratio$estimate,
+    c_rcilower = unlist(cor_c_ratio$conf.int[1]),
+    c_rciupper = unlist(cor_c_ratio$conf.int[2]),
+    t_r = cor_t_ratio$estimate,
+    t_rcilower = unlist(cor_t_ratio$conf.int[1]),
+    t_rciupper = unlist(cor_t_ratio$conf.int[2]),
+    g_r = cor_g_ratio$estimate,
+    g_rcilower = unlist(cor_g_ratio$conf.int[1]),
+    g_rciupper = unlist(cor_g_ratio$conf.int[2])
+  )
+  
+  # Append the result row to the results list
+  lm_results[[i]] <- result_row
+}
+
+# Combine the results into a single data frame
+lm_results <- do.call(rbind, lm_results)
+
+#Simplify the df names to just the clade names
+lm_results$df <- sapply(strsplit(as.character(lm_results$df), "_"), function(x) x[1])
+
+#export the data frame
+write.csv(lm_results, file = paste0(output_dir, "/lm_nucleotide_composition.csv"))
+
+
+#clean up environment
+rm(list = c("lm_a_ratio", "lm_c_ratio", "lm_g_ratio", "lm_t_ratio", "results_row", "cor_a_ratio", "cor_c_ratio", "cor_g_ratio", "cor_t_ratio", "i", "result_row"))
+
+invisible(gc())
+
+
+
+
+```
+
+```{r}
+#Plotting
+plot.data <- lm_results
+plot.data$Clade <- plot.data$df
+
+palette <- c("L" = "#9e0142",
+             "O" = "#d53e4f",
+             "V" = "#f46d43",
+             "S" = "#fdae61",
+             "G" = "#fee08b",
+             "GV" = "#e6f598",
+             "GH" = "#abdda4",
+             "GK" = "#66c2a5",
+             "GR" = "#3288bd",
+             "GRY" = "#5e4fa2",
+             "GRA" = "#afa0f4")
+
+  
+clade_order <- c("L", "O", "V", "S", "G", "GV", "GH", "GK", "GR", "GRY", "GRA")
+
+#C slope plot
+ggplot(plot.data, aes(x = Clade, y = c_slope, fill = Clade))+
+  geom_col()+
+  theme_bw()+
+  scale_x_discrete(limits = clade_order)+
+  scale_fill_manual(values = palette, breaks = clade_order)+
+  labs(y = "m", x = "Clade")+
+  ggtitle("Slope of %C Change in Genome")+
+  coord_cartesian(ylim = c(-1.4e-06, 1.4e-06))+
+  scale_y_continuous(breaks = seq(-1.4e-06, 1.4e-06, by = 0.0000002)) +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed", size = 1.1)
+  theme(plot.margin = margin(t = 1, b = 1, l = 1.25, r = 1.25))
+  
+#save plot
+ggsave(plot = last_plot(), file = "slope_c_allclades_extendedyaxis.png", 
+       width = 9.5, height = 5, units = "in", dpi = 600)
+
+
+
+
+#T slope plot
+ggplot(plot.data, aes(x = Clade, y = t_slope, fill = Clade))+
+  geom_col()+
+  theme_bw()+
+  scale_x_discrete(limits = clade_order)+
+  scale_fill_manual(values = palette, breaks = clade_order)+
+  labs(y = "m", x = "Clade")+
+  ggtitle("Slope of %T Change in Genome")+
+  coord_cartesian(ylim = c(-1.4e-06, 1.4e-06))+
+  scale_y_continuous(breaks = seq(-1.4e-06, 1.4e-06, by = 0.0000002)) +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed", size = 1.1)+
+  theme(plot.margin = margin(t = 1, b = 1, l = 1.25, r = 1.25))
+  
+#save plot
+ggsave(plot = last_plot(), file = "slope_t_allclades_extendedyaxis.png", 
+       width = 9.5, height = 5, units = "in", dpi = 600)
+
+```
+
+
+
+
+
+
+
+

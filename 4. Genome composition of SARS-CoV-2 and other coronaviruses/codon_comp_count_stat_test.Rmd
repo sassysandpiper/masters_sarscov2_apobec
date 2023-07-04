@@ -1,0 +1,121 @@
+---
+title: "Untitled"
+output: html_document
+date: "2023-07-03"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+install.packages("lmtest")
+
+library(tidyverse)
+library(lmtest)
+library(car)
+```
+
+
+```{r}
+codon1 <- read.csv("C:/Users/1044832/Desktop/Final graphs to include in thesis/4. Composition count/fig4 data/codon1_nucleotide_composition_n11000.csv")
+codon2 <- read.csv("C:/Users/1044832/Desktop/Final graphs to include in thesis/4. Composition count/fig4 data/codon2_nucleotide_composition_n11000.csv")
+codon3 <- read.csv("C:/Users/1044832/Desktop/Final graphs to include in thesis/4. Composition count/fig4 data/codon3_nucleotide_composition_n11000.csv")
+
+```
+
+```{r}
+########################
+#ANOVA to compare means#
+########################
+
+codon1means <- data.frame(a_mean = as.numeric(NA), c_mean = as.numeric(NA), t_mean = as.numeric(NA), g_mean = as.numeric(NA))
+codon2means <- data.frame(a_mean = as.numeric(NA), c_mean = as.numeric(NA), t_mean = as.numeric(NA), g_mean = as.numeric(NA))
+codon3means <- data.frame(a_mean = as.numeric(NA), c_mean = as.numeric(NA), t_mean = as.numeric(NA), g_mean = as.numeric(NA))
+
+
+codon1means$a_mean <- mean(codon1$a_ratio)
+codon1means$c_mean <- mean(codon1$c_ratio)
+codon1means$g_mean <- mean(codon1$g_ratio)
+codon1means$t_mean <- mean(codon1$t_ratio)
+
+codon2means$a_mean <- mean(codon2$a_ratio)
+codon2means$c_mean <- mean(codon2$c_ratio)
+codon2means$g_mean <- mean(codon2$g_ratio)
+codon2means$t_mean <- mean(codon2$t_ratio)
+
+codon3means$a_mean <- mean(codon3$a_ratio)
+codon3means$c_mean <- mean(codon3$c_ratio)
+codon3means$g_mean <- mean(codon3$g_ratio)
+codon3means$t_mean <- mean(codon3$t_ratio)
+
+
+
+combined_data <- rbind(codon1, codon2, codon3)
+
+# Create a grouping variable to identify each group
+combined_data$group <- factor(rep(c("codon1", "codon2", "codon3"), 
+                                  times = c(nrow(codon1), nrow(codon2), nrow(codon3))))
+
+#Perform ANOVA
+result <- aov(c_ratio ~ group, data = combined_data)
+#ad-hoc test
+tukey <- TukeyHSD(result)
+
+
+```
+
+```{r}
+###############################
+#ANOVA to compare regressions#
+###############################
+
+cod1_a <- lm(codon1$a_ratio ~ codon1$date)
+cod1_c <- lm(codon1$c_ratio ~ codon1$date)
+cod1_g <- lm(codon1$g_ratio ~ codon1$date)
+cod1_t <- lm(codon1$t_ratio ~ codon1$date)
+
+cod2_a <- lm(codon2$a_ratio ~ codon2$date)
+cod2_c <- lm(codon2$c_ratio ~ codon2$date)
+cod2_g <- lm(codon2$g_ratio ~ codon2$date)
+cod2_t <- lm(codon2$t_ratio ~ codon2$date)
+
+cod3_a <- lm(codon3$a_ratio ~ codon3$date)
+cod3_c <- lm(codon3$c_ratio ~ codon3$date)
+cod3_g <- lm(codon3$g_ratio ~ codon3$date)
+cod3_t <- lm(codon3$t_ratio ~ codon3$date)
+
+
+
+# Create a list of linear regression models
+regression_models <- list(cod1_a, cod1_c, cod1_g, cod1_t, cod2_a, cod2_c, cod2_g, cod2_t, cod3_a, cod3_c, cod3_g, cod3_t)
+
+# Create an empty matrix to store the p-values
+p_values <- matrix(nrow = length(regression_models), ncol = length(regression_models))
+
+# Perform pairwise comparisons of regression models
+for (i in 1:(length(regression_models) - 1)) {
+  for (j in (i + 1):length(regression_models)) {
+    coef_i <- coef(summary(regression_models[[i]]))
+    coef_j <- coef(summary(regression_models[[j]]))
+    
+    p_value <- t.test(coef_i[, "Estimate"], coef_j[, "Estimate"])$p.value
+    
+    p_values[i, j] <- p_value
+    p_values[j, i] <- p_value
+  }
+}
+
+# Add row and column names to the p-values matrix
+regression_names <- c("cod1_a", "cod1_c", "cod1_g", "cod1_t", "cod2_a", "cod2_c", "cod2_g", "cod2_t", "cod3_a", "cod3_c", "cod3_g", "cod3_t")
+rownames(p_values) <- regression_names
+colnames(p_values) <- regression_names
+
+# Print the p-values matrix
+print(p_values)
+
+
+
+anova_model <- anova(cod1_c, cod2_c)
+anova_model
+
+```
+
