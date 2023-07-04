@@ -1,0 +1,690 @@
+---
+title: "codon_usage_analysis"
+output: html_document
+date: "2023-05-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+install.packages("bioseq")
+
+library(ggplot2)
+library(tidyverse)
+library(readxl)
+library(bioseq)
+```
+
+
+
+
+
+
+
+
+MANDATORY DATA HANDLING
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#######################################################################################################
+DATA HANDLING TO LOAD SEQUENCES, MAKE CONSENSUS, ETC.
+#######################################################################################################
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Same across all analysis files
+
+```{r}
+
+################################################################################
+#STEP 1: READING SEQUENCES IN FROM FASTA FORMAT INTO DATA FRAME FOR ANALYSIS#
+################################################################################
+
+#PLEASE ENTER THE FILE PATH OF THE SEQUENCE FILE HERE
+file_path <- "C:/Users/1044832/Desktop/Sarbecoviruses/inframe_orf1ab_Sarbecovirus_sequences.fasta"
+lines <- readLines(file_path)
+
+
+#Initialize empty vectors for names and sequences
+#Vectors need to be initialized prior to using in a loop
+names_list <- c()
+sequences_list <- c()
+
+#Initialize new variables to hold the current names and sequence before adding them to the list
+current_name <- ""
+current_sequence <- ""
+
+#names_list and current_name are initialised differently because current_name only needs to hold one name at a time (hence only needs to be a string) while all current_names will be added to names_list (hence it needs to be a character vector to hold multiple strings)
+
+
+# Parse the lines
+for (line in lines) { # goes through all the lines one by one 
+  if (substr(line, 1, 1) == ">") { #substr separates out the part of the string that is specified, if first character of line is equal to > (a names line), then
+    
+    # New name, save previous sequence
+    if (current_name != "") {
+      names_list <- c(names_list, current_name)
+      sequences_list <- c(sequences_list, current_sequence)
+    }
+    # Start new sequence with this name
+    current_name <- gsub('>', '', line) # removing >
+    current_sequence <- ""
+  } else {
+    # Add to current sequence
+    current_sequence <- paste(current_sequence, line, sep="")
+  }
+}
+
+# Save the last name and sequence
+names_list <- c(names_list, current_name)
+sequences_list <- c(sequences_list, current_sequence)
+
+# Create a data frame with the name and sequence information
+df <- data.frame(name = names_list, sequence = sequences_list)
+
+# Cleaning up
+# Removing unwanted variables
+rm(list = c("current_name", "current_sequence", "line", "lines", "names_list", "sequences_list"))
+# Garbage Collection = removing temporary memory
+invisible(gc())
+
+
+```
+
+
+```{r}
+
+################################################################################
+#STEP 2: SEPARATING OUT EACH POSITION INTO ITS OWN ROW#
+################################################################################
+
+#identify the max length of the sequences
+max_length <- max(str_length(df$sequence))
+
+#Making all the sequences the same length for unnest_longer(), if sequences are shorter than the max length, add enough - at the end to make them equivalent
+df$sequence <- str_pad(df$sequence, max_length, "right", "-")
+
+#Separating each nucleotide
+df$split <- strsplit(df$sequence, split="")
+
+#Removing sequence column as its no longer needed
+df.min <- subset(df, select = c("name", "split"))
+
+#Making species names the column names
+df.wide <- pivot_wider(df.min, names_from = name, values_from = split)
+
+#Seperating the list into individual rows
+data <- df.wide %>% unnest_longer(c(colnames(df.wide)))
+
+#Cleaning environment
+rm(list=setdiff(ls(), c("data")))
+invisible(gc())
+
+
+```
+
+
+```{r}
+################################################################################
+#STEP 4: ADD IN CODON POSITION INFORMATION#
+################################################################################
+
+data$codonpos <- rep(c(1, 2, 3), length.out = nrow(data))
+all_genes <- data
+all_genes <- as.data.frame(
+  apply(all_genes, 2, function(x) tolower(x))
+)
+
+rm(data)
+gc()
+```
+
+
+```{r}
+################################################################################
+#STEP 5: TRANSLATION#
+################################################################################
+
+#Translating using R Bioseq package function
+  #Pros: in R
+  #Cons: slower, can't inspect the alignment
+
+all_genes_translated <- data.frame(position = seq(1, (nrow(all_genes)/3), 1))
+
+
+
+for (i in 1:(ncol(all_genes)-1)) {
+  tmp <- dna(paste(all_genes[, i], collapse = ""))
+  current_trans <- seq_translate(tmp, code = 1, codon_frame = 1, codon_init = FALSE)
+  current_trans <- str_split_1(current_trans, "")
+  current_colname <- colnames(all_genes[i])
+  tmp_df <- data.frame(current_trans)
+  names(tmp_df)[names(tmp_df) == "current_trans"] <- paste(current_colname)
+  all_genes_translated <- cbind(all_genes_translated, tmp_df)
+}
+
+rm(list = c("tmp_df", "current_colname", "current_trans", "i", "tmp"))
+invisible(gc())
+```
+
+
+```{r}
+################################################################################
+#STEP 6: AMINO ACID FREQUENCY TABLE#
+################################################################################
+
+# Create an empty data frame to store the frequency tables
+aa_freq <- data.frame(sequence = character(), aa = character(), frequency = numeric(), stringsAsFactors = FALSE)
+
+# Loop through each column in the data frame
+for (col_name in colnames(all_genes_translated[2:(ncol(all_genes_translated))])) {
+  # Calculate frequency table for the column
+  freq_table <- table(all_genes_translated[[col_name]])
+  
+  # Extract unique entries and their counts
+  unique_entries <- names(freq_table)
+  counts <- as.numeric(freq_table)
+  
+  # Create a data frame for the current column
+  current_freq_df <- data.frame(sequence = col_name, aa = unique_entries, aa_frequency = counts, stringsAsFactors = FALSE)
+  
+  # Append the current column's data to the frequency data frame
+  aa_freq <- rbind(current_freq_df, aa_freq)
+  #Delete any blank spaces in the sequence name
+  aa_freq$sequence <- gsub("\\s+", "", aa_freq$sequence)
+}
+
+rm(list = c("current_freq_df", "col_name", "counts", "freq_table", "unique_entries"))
+invisible(gc())
+
+```
+
+
+```{r}
+################################################################################
+#STEP 4b: CREATING CODON LIST#
+################################################################################
+
+# Specify the data frame names
+data_frame_names <- c("all_genes")
+
+# Iterate over each data frame name
+for (df_name in data_frame_names) {
+  # Get the data frame using the name
+  data_frame <- get(df_name)
+
+  # Create a new data frame for codons
+  codon_df <- data.frame(matrix(ncol = ncol(data_frame) - 16, nrow = nrow(data_frame) / 3))
+
+  # Iterate over each column in the data frame
+  for (j in 1:(ncol(data_frame))) {
+    # Compile bases into codons
+    codons <- matrix(data_frame[, j], ncol = 3, byrow = TRUE)
+
+    # Assign codons to the corresponding column in the codon data frame
+    codon_df[, j] <- apply(codons, 1, paste, collapse = "")
+  }
+
+  # Assign column names to the codon data frame
+  colnames(codon_df) <- colnames(data_frame)[1:ncol(data_frame)]
+
+  # Create the name for the new data frame
+  new_df_name <- paste0(df_name, "_codon")
+
+  # Assign the name to the codon data frame
+  assign(new_df_name, codon_df)
+}
+
+
+for (i in data_frame_names) {
+  df <- get(i)
+  df <- df[1:(ncol(df) - 16)]
+  df$gene <- paste0(sub("^(.*?)_.*$", "\\1", i))
+  assign(i, df)
+}
+
+#Clean up environemnt
+rm(list = c("codon_df", "all_genes", "codons", "data_frame", "df", "data_frame_names", "df_name", "i", "j", "new_df_name"))
+invisible(gc())
+
+```
+
+
+```{r}
+################################################################################
+#STEP 5: CODON FREQUENCY TABLES#
+################################################################################
+
+#Import codon table
+reference_codon_table <- read_xlsx("codon_table.xlsx")
+
+# Create an empty data frame to store the frequency tables
+codon_freq <- data.frame(sequence = character(), codon = character(), frequency = numeric(), stringsAsFactors = FALSE)
+
+# Loop through each column in the data frame
+for (col_name in colnames(all_genes_codon[1:(ncol(all_genes_codon)-3)])) {
+  # Calculate frequency table for the column
+  freq_table <- table(all_genes_codon[[col_name]])
+  
+  # Extract unique entries and their counts
+  unique_entries <- names(freq_table)
+  counts <- as.numeric(freq_table)
+  
+  # Create a data frame for the current column
+  current_freq_df <- data.frame(sequence = col_name, codon = unique_entries, codon_frequency = counts, stringsAsFactors = FALSE)
+  
+  # Append the current column's data to the frequency data frame
+  codon_freq <- rbind(current_freq_df, codon_freq)
+  
+}
+
+#Filter out any codons that are incomplete (with "-" or "N")
+codon_freq <- codon_freq[codon_freq$codon %in% reference_codon_table$codon, , drop = FALSE]
+
+
+#Clean up environment
+rm(list = c("current_freq_df", "col_name", "counts", "freq_table", "unique_entries"))
+invisible(gc())
+
+```
+
+
+```{r}
+################################################################################
+#STEP 5: CALCULATING RSCU VALUES#
+################################################################################
+
+#Intiate a bunch of data frames
+results_all_codons_rscu <- data.frame()
+results_all_codons_full_info  <- data.frame()
+merged_df <- data.frame()
+
+#Create a list of all sequence names for the for loop
+seq_names <- paste(colnames(all_genes_codon[1:(ncol(all_genes_codon)-1)]))
+
+#Make sure the sequence names are same across everything
+aa_freq$sequence <- gsub(" ", "", aa_freq$sequence)
+codon_freq$sequence <- gsub(" ", "", codon_freq$sequence)
+seq_names <- lapply(seq_names, function(x) gsub(" ", "", x))
+
+
+
+for (j in seq_names) {
+  #Filter out all codon frequency rows that belong to the current sequence and paste them into tmp data frame
+  codon_current_freq <- filter(codon_freq, codon_freq$sequence == j)
+  #Filter out all amino acid frequency rows that belong to the current sequence and paste them into tmp data frame
+  aa_current_freq <- filter(aa_freq, aa_freq$sequence == j)
+  #Omit first row of amino acid frequency table to make merging down the line easier
+  aa_current_freq <- aa_current_freq[-1]
+  
+  #wipe merged_df (tmp data frame to store merged codon and amino acid info)
+  merged_df <- data.frame()
+  #merge codon frequency and codon table to obtain the synonymous codon frequency for each amino acid
+  merged_df <- merge(codon_current_freq, reference_codon_table, by = "codon", all = TRUE, all.x = TRUE)
+  #Fill in any NA values in case any of the sequences are entirely missing a codon
+  merged_df$sequence[is.na(merged_df$sequence)] <- j
+  merged_df$codon_frequency[is.na(merged_df$codon_frequency)] <- 0
+  #merge codon information with amino acid information
+  merged_df <- merge(merged_df, aa_current_freq, by = "aa")
+  
+  #Calculate RSCU
+  merged_df$rscu <- merged_df$codon_frequency / (merged_df$aa_frequency / merged_df$syn_freq)
+
+  #Output into a new data frame with just rscu numbers
+  rotated_df <- data.frame(sequence = merged_df$sequence, codon = merged_df$codon, rscu = merged_df$rscu)
+  rotated_df <- rotated_df %>%
+  pivot_wider(names_from = codon, values_from = rscu)
+  results_all_codons_rscu <- rbind(results_all_codons_rscu, rotated_df)
+
+  #Output full data frame (in longer format) into separate data frame
+  results_all_codons_full_info  <- rbind(results_all_codons_full_info , merged_df)
+}
+
+
+#Extract date information for the results_all_codons_rscu data frame
+results_all_codons_rscu$date <- str_extract(results_all_codons_rscu$sequence, "\\d{4}-\\d{2}-\\d{2}")
+results_all_codons_rscu$date <- as.Date(results_all_codons_rscu$date)
+
+
+
+
+
+
+#Clean up environemnt
+rm(list = c("aa_current_freq", "merged_df", "rotated_df", "j", "seq_names", "codon_current_freq", "aa_freq", "all_genes_codon", "all_genes_translated", "codon_freq", "reference_codon_table"))
+invisible(gc)
+
+
+#Write csv files because this analysis took so fucking long
+write.csv(results_all_codons_rscu, file = "sarbecovirus_orf1ab_rscu.csv")
+write.csv(results_all_codons_full_info, file = "sarbecovirus_orf1ab_full_rscu_info.csv")
+
+```
+
+
+```{r}
+################################################################################
+#STEP 5: SEPARATING RSCU NUMBERS BASED ON AMINO ACIDS#
+################################################################################
+#Read the results csv files in
+results_all_codons_rscu <- read.csv("sarbecovirus_orf1ab_rscu.csv")
+
+#Assign all codons to a list
+codons <- colnames(results_all_codons_rscu[2:65])
+
+#Converting original data frame to long format for plotting
+results_all_codons_rscu <- cbind(results_all_codons_rscu[, "sequence", drop = FALSE], results_all_codons_rscu[, 2:65])
+long_df <- gather(results_all_codons_rscu, key = "codon", value = "rscu", all_of(codons))
+
+#Adding date column
+long_df$date <- as.Date(str_extract(long_df$sequence, "\\d{4}-\\d{2}-\\d{2}"))
+
+#Adding amino acid annotation
+long_df$amino_acid <- NA
+
+#Stop codon
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("tag", "taa", "tga"), "Stop", long_df$amino_acid)
+#Alanine (A)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("gct", "gcc", "gca", "gcg"), "Ala", long_df$amino_acid)
+#Cysteine (C)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("tgt", "tgc"), "Cys", long_df$amino_acid)
+#Aspartic acid (D)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("gat", "gac"), "Asp", long_df$amino_acid)
+#Glutamic acid (E)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("gaa", "gag"), "Glu", long_df$amino_acid)
+#Phenylalanine (F)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("ttt", "ttc"), "Phe", long_df$amino_acid) 
+#Glycine (G)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("ggt", "ggc", "gga", "ggg"), "Gly", long_df$amino_acid) 
+#Histidine (H)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("cat", "cac"), "His", long_df$amino_acid) 
+#Isoleucine (I)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("att", "atc", "ata"), "Ile", long_df$amino_acid) 
+#Lysine (K)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("aaa", "aag"), "Lys", long_df$amino_acid) 
+#Leucine (L)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("tta", "ttg", "ctt", "ctc", "cta", "ctg"), "Leu", long_df$amino_acid)
+#Methionine (M)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("atg"), "Met", long_df$amino_acid)
+#Asparagine (N)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("aat", "aac"), "Asn", long_df$amino_acid)
+#Proline (P)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("cct", "ccc", "cca", "ccg"), "Pro", long_df$amino_acid)
+#Glutamine (Q)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("caa", "cag"), "Gln", long_df$amino_acid)
+#Arginine (R)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("cgt", "cgc", "cga", "cgg", "aga", "agg"), "Arg", long_df$amino_acid)
+#Serine (S)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("tct", "tcc", "tca", "tcg", "agt", "agc"), "Ser", long_df$amino_acid)
+#Threonine (T)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("act", "acc", "aca", "acg"), "Thr", long_df$amino_acid)
+#Valine (V)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("gtt", "gtc", "gta", "gtg"), "Val", long_df$amino_acid)
+#Tryptophan (W)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("tgg"), "Trp", long_df$amino_acid)
+#Tyrosine (Y)
+  long_df$amino_acid <- ifelse(long_df$codon %in% c("tat", "tac"), "Tyr", long_df$amino_acid)
+
+
+
+# Calculate the mean of 'rscu' grouped by 'codons' and store the result in a new data frame
+mean_df <- long_df %>%
+  group_by(codon) %>%
+  summarize(mean_rscu = mean(rscu),
+            ci_lower = mean(rscu) - qt(0.975, n() - 1) * sd(rscu) / sqrt(n()),
+            ci_upper = mean(rscu) + qt(0.975, n() - 1) * sd(rscu) / sqrt(n()))
+
+
+# Merge the mean data frame with the original data frame based on 'codons'
+codon_info <- data.frame(codon = long_df$codon, amino_acid = long_df$amino_acid)
+codon_info <- distinct(codon_info)
+mean_df <- merge(codon_info, mean_df, by = "codon", all.x = TRUE)
+
+#Write mean_df csv to manually edit in excel
+write.csv(mean_df, file = "sarbecovirus_rscu_mean_df.csv")  
+
+  
+  
+######################################
+#GO FROM HERE TO CHANGE RSCU GRAPH!!!#
+######################################
+  
+mean_df <- read.csv("both_rscu_mean_df.csv")  
+mean_df$group <- toupper(mean_df$group)
+mean_df$virus <- gsub("_", "-", mean_df$virus)
+mean_df$virus <- gsub("Sarbecovirus", "Bat Sarbecovirus", mean_df$virus)
+mean_df$group <- gsub("T", "U", mean_df$group)
+  
+  
+options(repr.plot.width =12)  
+
+
+
+ggplot(mean_df, aes(fill = group, x = amino_acid, y = mean_rscu)) +
+  theme_bw() +
+  geom_bar(position = "stack", stat = "identity", width = 0.8) +
+  labs(fill = "3rd codon base", x = "", y = "RSCU") +
+  facet_grid(virus ~ type, scales = "free", space = "free_x") +
+  coord_cartesian(ylim = c(0, 4.5))+
+  theme()
+
+
+#Stacked bar chart to show profile of rscu
+ggplot(mean_df, aes(fill = factor(group), x = amino_acid, y = mean_rscu)) +
+  theme_bw() +
+  geom_bar(position = "stack", stat = "identity", width = 0.8, color = "black") +
+  labs(fill = "3rd codon base", x = "", y = "RSCU") +
+  facet_grid(virus ~ type, scales = "free", space = "free_x") +
+  coord_cartesian(ylim = c(0, 4.5)) +
+  scale_fill_manual(values = c("A" = "#FF9900", "C" = "#006699", "U" = "#FF006F", "G" = "#669900"))+
+  theme(axis.title = element_text(size = 16, face = "bold"))+
+  theme(axis.text = element_text(size = 14))+
+  theme(strip.text = element_text(size = 12, face = "bold"))
+
+ggsave(plot = last_plot(), file = "rscu_sars_sarbeco.png", 
+       width = 20, height = 10, units = "in", dpi = 600)
+
+
+
+
+
+#P values - add manually in biorender afterwards
+
+sarscov2_rscu <- read.csv("allclades_n11000_rscu.csv")
+sarbeco_rscu <- read.csv("sarbecovirus_orf1ab_rscu.csv")
+
+# Initialize a new data frame to store the results
+result_df <- data.frame(Column = character(), P_Value = numeric(), stringsAsFactors = FALSE)
+
+# Perform t-test for each corresponding column pair
+for (col_name in colnames(sarscov2_rscu[, 3:66])) {
+  p_value <- t.test(sarscov2_rscu[[col_name]], sarbeco_rscu[[col_name]])$p.value
+  significance <- ifelse(p_value < 0.0001, "****",
+                         ifelse(p_value < 0.001, "***",
+                                ifelse(p_value < 0.01, "**",
+                                       ifelse(p_value < 0.05, "*", "n.s."))))
+  result_df <- rbind(result_df, data.frame(Column = col_name, P_Value = p_value, Significance = significance))
+}
+
+write.csv(result_df, file = "sarscov2_vs_sarbecovirus_rscu_ttest_pvalues.csv", row.names = FALSE)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#comparing only codons where the last base is C
+plot.data.only.c <- filter(mean_df, mean_df$group == "C")
+
+ggplot(plot.data.only.c, aes(fill = virus, x = amino_acid, y = mean_rscu)) +
+  theme_bw() +
+  geom_bar(width=.8, stat='identity', position=position_dodge(), color = "black") +
+  labs(fill = "Virus", x = "", y = "RSCU") +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.5, position = position_dodge(0.8))+
+  scale_fill_manual(values = c(`Bat Sarbecovirus` = "#6de9ed", `SARS-CoV-2` = "#006699"))+
+  theme(axis.text = element_text(size = 12))+
+  coord_cartesian(ylim = c(0, 2.5))+
+  theme(axis.title.y = element_text(size = 14, face = "bold"))
+
+ggsave(last_plot(), file = "sars-cov-2 vs sarbecovirus rcsu only codons that end in c.png", width = 15, height = 6, units = "in", dpi = 600)
+
+
+
+
+#comparing only codons where the last base is T
+plot.data.only.t <- filter(mean_df, mean_df$group == "T")
+
+ggplot(plot.data.only.t, aes(fill = virus, x = amino_acid, y = mean_rscu)) +
+  theme_bw() +
+  geom_bar(width=.8, stat='identity', position=position_dodge(), color = "black") +
+  labs(fill = "Virus", x = "", y = "RSCU") +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.5, position = position_dodge(0.8))+
+  scale_fill_manual(values = c(`Bat Sarbecovirus` = "#fcd2e1", `SARS-CoV-2` = "#ff006f"))+
+  theme(axis.text = element_text(size = 12))+
+  theme(axis.title.y = element_text(size = 14, face = "bold"))+
+  coord_cartesian(ylim = c(0, 2.5))
+
+ggsave(last_plot(), file = "sars-cov-2 vs sarbecovirus rcsu only codons that end in T.png", width = 15, height = 6, units = "in", dpi = 600)
+
+
+
+
+#comparing only codons where the last base is G
+plot.data.only.g <- filter(mean_df, mean_df$group == "G")
+
+ggplot(plot.data.only.g, aes(fill = virus, x = amino_acid, y = mean_rscu)) +
+  theme_bw() +
+  geom_bar(width=.8, stat='identity', position=position_dodge(), color = "black") +
+  labs(fill = "Virus", x = "", y = "RSCU") +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.5, position = position_dodge(0.8))+
+  scale_fill_manual(values = c(`Bat Sarbecovirus` = "#D1F18F", `SARS-CoV-2` = "#669900"))+
+  theme(axis.text = element_text(size = 12))+
+  theme(axis.title.y = element_text(size = 14, face = "bold"))+
+  coord_cartesian(ylim = c(0, 2.5))
+
+ggsave(last_plot(), file = "sars-cov-2 vs sarbecovirus rcsu only codons that end in G.png", width = 15, height = 6, units = "in", dpi = 600)
+
+
+
+#comparing only codons where the last base is A
+plot.data.only.a <- filter(mean_df, mean_df$group == "A")
+
+ggplot(plot.data.only.a, aes(fill = virus, x = amino_acid, y = mean_rscu)) +
+  theme_bw() +
+  geom_bar(width=.8, stat='identity', position=position_dodge(), color = "black") +
+  labs(fill = "Virus", x = "", y = "RSCU") +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.5, position = position_dodge(0.8))+
+  scale_fill_manual(values = c(`Bat Sarbecovirus` = "#FFE1B4", `SARS-CoV-2` = "#FF9900"))+
+  theme(axis.text = element_text(size = 12))+
+  theme(axis.title.y = element_text(size = 14, face = "bold"))+
+  coord_cartesian(ylim = c(0, 3.5))
+
+ggsave(last_plot(), file = "sars-cov-2 vs sarbecovirus rcsu only codons that end in A.png", width = 15, height = 6, units = "in", dpi = 600)
+
+
+```
+
+
+
+```{r} 
+year <- 2019
+month <- 11
+day <- 20
+x_coord <- as.Date(paste(year, month, day, sep = "-"))
+
+
+
+
+
+
+
+A_rscu$gcc <- as.numeric(A_rscu$gcc)
+A_rscu$date <- as.Date(A_rscu$date)
+A_rscu$date_numeric <- as.numeric(A_rscu$date)
+
+lm(A_rscu$gct ~ A_rscu$date)
+
+ggplot(A_rscu, aes(x = date, y = gct))+
+  geom_point()
+
+lm(A_rscu$gcc ~ A_rscu$date)
+
+ggplot(A_rscu, aes(x = date, y = gcc))+
+  geom_point()
+
+
+
+#Linear regression for g_ratio against date
+regression <- lm(A_rscu$gct ~ A_rscu$date)
+slope <- regression$coefficients[2]
+intercept <- regression$coefficients[1]
+
+#Pearson's correlation test
+cortest_a <- cor.test(A_rscu$date_numeric, A_rscu$gct, method = "pearson")
+r <- cortest_a$estimate
+
+#Scatter plot with regression line
+ggplot(A_rscu, aes(x = date, y = gct))+
+  geom_jitter(alpha = 0.3, size = 0.9, color = "coral2")+
+  theme_bw()+
+  coord_cartesian(ylim = c(2.1, 2.2))+
+  scale_y_continuous(breaks = seq(2.1, 2.2, by = 0.025)) +
+  theme(aspect.ratio = 1/2)+
+  labs(y = "RSCU", x = "Sample Collection Date")+
+  geom_text(x = x_coord, y = 2.2, label = paste0("m = ", sprintf("%.3e", slope)), color = "black", hjust = 0)+
+  geom_text(x = x_coord, y = 2.193, label = paste0("r = ", sprintf("%.3f", r)), color = "black", hjust = 0)+
+  ggtitle("GCT (Ala)")+
+  theme(plot.title = element_text(size = 16))+
+  theme(plot.title = element_text(hjust = 0))+
+  geom_abline(intercept = intercept, slope = slope, color = "black")+
+  theme(plot.margin = margin(t = 1, b = 1, l = 1.25, r = 1.25))
+
+#Save plot
+ggsave(plot = last_plot(), file = "GCT.png", 
+       width = 9.5, height = 5, units = "in", dpi = 600)
+
+
+
+
+
+
+
+#Linear regression for g_ratio against date
+regression <- lm(A_rscu$gcc ~ A_rscu$date)
+slope <- regression$coefficients[2]
+intercept <- regression$coefficients[1]
+
+#Pearson's correlation test
+cortest_a <- cor.test(A_rscu$date_numeric, A_rscu$gcc, method = "pearson")
+r <- cortest_a$estimate
+
+#Scatter plot with regression line
+ggplot(A_rscu, aes(x = date, y = gcc))+
+  geom_jitter(alpha = 0.3, size = 0.9, color = "aquamarine3")+
+  theme_bw()+
+  coord_cartesian(ylim = c(0.53, 0.63))+
+  scale_y_continuous(breaks = seq(0.53, 0.63, by = 0.025)) +
+  theme(aspect.ratio = 1/2)+
+  labs(y = "RSCU", x = "Sample Collection Date")+
+  geom_text(x = x_coord, y = 0.63, label = paste0("m = ", sprintf("%.3e", slope)), color = "black", hjust = 0)+
+  geom_text(x = x_coord, y = 0.623, label = paste0("r = ", sprintf("%.3f", r)), color = "black", hjust = 0)+
+  ggtitle("GCC (Ala)")+
+  theme(plot.title = element_text(size = 16))+
+  theme(plot.title = element_text(hjust = 0))+
+  geom_abline(intercept = intercept, slope = slope, color = "black")+
+  theme(plot.margin = margin(t = 1, b = 1, l = 1.25, r = 1.25))
+
+#Save plot
+ggsave(plot = last_plot(), file = "GCC.png", 
+       width = 9.5, height = 5, units = "in", dpi = 600)
+
+```
+
+
+
+
