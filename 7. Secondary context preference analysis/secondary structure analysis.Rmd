@@ -1,0 +1,1230 @@
+---
+title: "secondary structure analysis"
+output: html_document
+date: "2023-05-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(readxl)
+library(ggbreak)
+
+```
+
+
+
+MANDATORY DATA HANDLING
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#######################################################################################################
+DATA HANDLING TO LOAD SEQUENCES, MAKE CONSENSUS, ETC.
+#######################################################################################################
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Same across all analysis files
+
+```{r}
+
+#############################################################################
+#STEP 1: READING SEQUENCES IN FROM FASTA FORMAT INTO DATA FRAME FOR ANALYSIS#
+#############################################################################
+
+
+# Read in the file
+# readLines() creates a variable where each element contains a string for each line of the file
+lines <- readLines("C:/Users/1044832/Desktop/aligned_clade/all_clades_no_gaps_aligned_with_dates.fasta")
+
+
+# To access each line you can just use indexing
+print(lines[1]) # prints the first line of the file - first sequence name
+print(lines[2]) # prints the second line of the file - start of first sequence
+
+# Initialize empty vectors for names and sequences
+# Vectors need to be initialized prior to using in a loop
+names_list <- c()
+sequences_list <- c()
+
+# Initialize new variables to hold the current names and sequence before adding them to the list
+current_name <- ""
+current_sequence <- ""
+
+#names_list and current_name are initialised differently because current_name only needs to hold one name at a time (hence only needs to be a string) while all current_names will be added to names_list (hence it needs to be a character vector to hold multiple strings)
+
+
+# Parse the lines
+for (line in lines) { # goes through all the lines one by one 
+  if (substr(line, 1, 1) == ">") { #substr separates out the part of the string that is specified, if first character of line is equal to > (a names line), then
+    
+    # New name, save previous sequence
+    if (current_name != "") {
+      names_list <- c(names_list, current_name)
+      sequences_list <- c(sequences_list, current_sequence)
+    }
+    # Start new sequence with this name
+    current_name <- gsub('>', '', line) # removing >
+    current_sequence <- ""
+  } else {
+    # Add to current sequence
+    current_sequence <- paste(current_sequence, line, sep="")
+  }
+}
+
+# Save the last name and sequence
+names_list <- c(names_list, current_name)
+sequences_list <- c(sequences_list, current_sequence)
+
+# Create a data frame with the name and sequence information
+df <- data.frame(name = names_list, sequence = sequences_list)
+
+# Cleaning up
+# Removing unwanted variables
+rm(list = c("current_name", "current_sequence", "line", "lines", "names_list", "sequences_list"))
+# Garbage Collection = removing temporary memory
+invisible(gc())
+
+
+```
+
+
+```{r}
+
+#######################################################
+#STEP 2: SEPARATING OUT EACH POSITION INTO ITS OWN ROW#
+#######################################################
+
+# get the maximum length of the strings in the sequence column
+max_length <- max(str_length(df$sequence))
+
+# extend the strings by adding dashes to the end
+df$sequence <- str_pad(df$sequence, max_length, "right", "-")
+
+# Separating each nucleotide
+df$split <- strsplit(df$sequence, split="")
+
+# Removing sequence column as its no longer needed
+df.min <- subset(df, select = c("name", "split"))
+
+# Making species names the column names
+df.wide <- pivot_wider(df.min, names_from = name, values_from = split)
+
+# Seperating the list into individual rows
+data <- df.wide %>% unnest_longer(c(colnames(df.wide)))
+
+# Adding position column
+data$position <- seq(1,nrow(data),1)
+
+# Cleaning environment
+rm(list=setdiff(ls(), c("data", "df")))
+invisible(gc())
+
+
+
+```
+
+
+```{r}
+
+################################################################
+#STEP 3: COUNTING FREQUENCY OF EACH NUCLEOTIDE IN EACH POSITION#
+################################################################
+
+nucleotides <- c("a", "t", "c", "g", "n", "-")
+
+
+for (i in nucleotides) {
+  x <- rowSums(data == tolower(i))         # Counts the number of occurrences of the nucleotide across the rows
+  data[ , ncol(data) + 1] <- x             # Append new column
+  colnames(data)[ncol(data)] <- paste(i)  # Rename column name
+  
+}
+
+#clean up environment
+rm(list = c("i", "nucleotides", "x"))
+invisible(gc())
+
+```
+
+
+```{r}
+
+#########################################################################
+#STEP 4: FINDING CONSENSUS SEQUENCE AT A DESIGNATED THRESHOLD (75% HERE)#
+#########################################################################
+
+#create data frame with position & nucleotide counts only
+nucleotide_counts <- subset(data, select = c("position", "a", "t", "c", "g"))
+
+consensus_count <- nucleotide_counts %>%
+               pivot_longer(!position, names_to = "nucleotide", values_to = "count")
+
+consensus_count <- consensus_count[order(consensus_count$position),] # ordering data by position (ascending order)
+
+#change the formula below to achieve the correct consensus cut off - nrow(df) is the number of sequences in data set
+#here the threshold is set at 75%
+consensus_threshold <- nrow(df)/4*3
+
+
+# creates new temporary data frame tmp1, and identifies positions where a nucleotide occurs in more than 75% of all sequences, but omits positions where there is no consensus base
+tmp1 <- subset(consensus_count, consensus_count$count >= (consensus_threshold)) 
+
+#creating data frame with just positions
+tmp2 <- data.frame(position = seq(1,nrow(data),1)) 
+
+# adds back positions where there is no consensus base as NA
+consensus <- merge(tmp1, tmp2, all = TRUE)
+
+# Replacing missing nucleotides with -
+consensus$nucleotide[is.na(consensus$nucleotide) == TRUE] <- "-"
+
+
+#joins consensus into a single string
+consensus_sequence_str <- ""
+
+for (i in 1:nrow(consensus)) {
+  x <- consensus$nucleotide[i]
+  consensus_sequence_str <- paste(consensus_sequence_str, x, sep="") # Adding each residue one by one
+}
+
+
+############################################################################
+#OPTION 2 FOR CONSENSUS: CONSENSUS WITH NO CUTOFF, TAKES MOST ABUNDANT BASE#
+############################################################################
+
+#tmp1 <- consensus_count %>% 
+#          group_by(position) %>% 
+#           slice(which.max(count)) 
+
+#tmp2 <- data.frame(position = seq(1,nrow(data),1)) 
+
+#consensus <- merge(tmp1, tmp2, all = TRUE) # adds back positions not conserved as NA
+
+#consensus$nucleotide[is.na(consensus$nucleotide) == TRUE] <- "-" # Replacing missing residues with -
+
+#no_lim_consensus_sequence <- ""
+
+#for (i in 1:nrow(consensus)) {
+#  x <- consensus$nucleotide[i]
+#  no_lim_consensus_sequence <- paste(no_lim_consensus_sequence, x, sep="") # Adding each residue one by one
+#}
+
+# Adding consensus sequence to data
+consensus_seq <- consensus$nucleotide
+data <-cbind(consensus_seq,data)
+
+# Cleaning up environment
+rm(list = c("tmp1", "tmp2", "i", "x", "consensus_seq", "consensus_threshold", "nucleotide_counts", "consensus_count", "consensus", "df", "consensus_sequence_str"))
+invisible(gc())
+
+```
+
+
+
+
+
+
+
+
+
+Analysis
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##################################################################################################################
+SEQUENCE CHANGE ANALYSIS - COUNTING NUMBER OF MUTATIONS AGAINST DESIGNATED SEQUENCE BASED ON A FREQUENCY THRESHOLD
+##################################################################################################################
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Analysis workflow:
+
+#Step 1#
+Load in the wrangled .ct files of SARS-CoV-2 genome secondary structure. See code "secondary structure data wrangling" ("C:\Users\1044832\Desktop\Analysis\Secondary structure analysis\secondary structure data wrangling.Rmd") for detailed information. The excel file data_all_no_structural_details.xlsx is loaded in to the data frame "strudata". This data frame has 5 columns. The contents of each column are described below:
+
+- position: position of base
+- base: A, T, C, or G
+- pair: The position number of the base that the current base is paired to, if any. For instance, if pair = 23 for the base at position 2, the bases at position 2 and 23 are bound together. If pair = 0, the base is not bound to anything.
+- structure: what kind of structure is this base in - stem, loop, or link. Stem is any bound base, loop is any unbound base in a secondary structure, and link is any base that is outside of any secondary structure.This information is only available up to position 21600.
+- ds_or_ss: whether the base is in a double stranded or single stranded region (less informative data about secondary structure that is available for all base positions, makes up for lack of structure information past position 21600)
+
+After the data frame is loaded in, the definitions loop, ds and ss are assigned to the appropriate rows.
+
+#Step 2#
+Sequence change count on the sequence data frame "data". The code in this step are borrowed from the sequence change analysis code - it is simply placed in this R Markdown file to avoid overcrowding of confusing data frames and repeated data frame names. The resulting data is stored in data frame "analysis_dataset", where new columns have been added to identify the positions where there have been mutations
+
+#Step 3#
+Filtering out mutations that occur more than a frequency threshold. While this does not account for highly variable sites (where C>U mutations are usually not going to be due to any specific drivers such as APOBEC), it does account for phylogenetically linked mutations (the mutations came across before the phylogenetic split, and occur at high frequencies due to shared phylogeny rather than convergent APOBEC editing). The resulting filtered data set is stored in a data set named "filtered_freq_[insert frequency filter here]". This the data set we will work out of now.
+
+In the last couple of columns in this data set, several pieces of information are available:
+  - Position number
+  - number of each base (a, t, c, g), no base call (n), or gap (-) at each position
+  - number of each type of mutation at each position
+
+#Step 4#
+Merging the structural data (stored in data frame "strudata") and the base count/sequence change analysis columns in the main data frame (stored in data frame "data"). The new merged data frame is called "stru_analysis"
+
+#Step 5#
+Two calculations are carried out in this section. First, all mutations that occurred in a specific type of strandedness (ds or ss) or secondary structure (link, loop, or stem) are summed to give the total number of mutations in each type of secondary structure context. Second, the total number of bases in each type of secondary structure context is also counted. Having this measurement allows me to calculate a normalised ratio to represent the relative frequency of mutations adjusted for the frequency of each base in secondary structures. The sums are outputted into a data frame called "stru_analysis_output".
+
+#Step 6#
+Calculating the normalised ratio for frequency of mutations in each structural context. First, a new data frame is created to store all the ratio calculations. This data frame name changes depending on which mutation we are focusing on, for C>U mutations, the data frame is named "c_u_ratios". The columns "structure" containing the secondary structure categories, "sum_n_c_t" containing the total number of C>U mutations in each type of secondary structure, and "n_c_all" cotaining the total number of Cs in each type of secondary structure are extracted from the data frame stru_analysis_output. The column "sum_n_c_t" is then divded by "n_c_all" to produce a normalised frequency ratio for each type of secondary structure context. The result of this calculation is stored in the column "normalised_ratio". Lastly, a 95% confidence interval is calculated for each ratio using the Wilson score method. The upper and lower bounds of the  95% CI are stored in the columns "CI95_upper" and "CI95_lower". The ratios are then plotting in a bar chart with error bars. The same analysis can be done on any other type of mutation as a control.
+
+#Step 7#
+As established in step 6, there is a statistically-significant abundance of C>U mutations in single stranded genomic region. In step 7, we will establish exactly what position in the single-stranded regions do most C>U mutations lie. First, a for loop iterates through every position where 1.there is a C>U mutation, and 2. is in a single-stranded region. The number of single-stranded bases before and after the mutated base is counted and recorded in the columns "ss_before" and "ss_after". The total length of the single-stranded region is calculated and stored in the column "total_ss_length". Then, a relative mutation position metric is calculated to quantify exactly where the mutated base sits in the single-stranded region, where relative mutation position (RMP) = (ss_before + 1)/total_ss_length (in other words, the position of the mutation relative to the single stranded region, divded by the total length of the single stranded region). If RMP = 0, the mutation sits at the 5' end of the single stranded region. If RMP = 1, the mutation sits at the 3' end of the single stranded region. A histogram of RMPs is then plotted. 
+
+#Step 8#
+In previous literature, human APOBEC3A and 3G have been established to have a preference for editing the 3'-most C in loop regions. If most of the C>U mutations in our data set are caused by APOBECs, we would expect to see a similar mutational preference for 3'-most Cs in loop regions (RMP = 1). The same analysis as described in step 7 is repeated for only loop regions in this step.
+
+
+```{r}
+################################################################################
+#STEP 2: SEQUENCE CHANGE ANALYSIS#
+################################################################################
+
+#before comparing datasets, make a new data frame with all sequences to be analysed, and only the sequence that comparisons are being made to
+data_no_ref <- data[,3:ncol(data)]
+analysis_dataset <- cbind(data$consensus_seq, data_no_ref) 
+#**change "consensus_seq" to WT sequence name if comparing against WT sequence
+
+
+#renaming consensus sequence in analysis_dataset
+names(analysis_dataset)[names(analysis_dataset) == 'data$consensus_seq'] <- 'consensus_seq'
+
+
+# Comparing to designated sequence
+ref_sequence_name = colnames(analysis_dataset)[1] 
+#**change index number depending on where the sequence you want to compare to is - 1 for consensus, 2 for WT
+
+# Make new col to store mutations
+analysis_dataset$`n_a_t` = 0
+analysis_dataset$`n_a_c` = 0
+analysis_dataset$`n_a_g` = 0
+analysis_dataset$`n_t_a` = 0
+analysis_dataset$`n_t_c` = 0
+analysis_dataset$`n_t_g` = 0
+analysis_dataset$`n_c_a` = 0
+analysis_dataset$`n_c_t` = 0
+analysis_dataset$`n_c_g` = 0
+analysis_dataset$`n_g_a` = 0
+analysis_dataset$`n_g_t` = 0
+analysis_dataset$`n_g_c` = 0
+
+
+#before starting code below, check what case the consensus/reference genome is in, and change case of the atcg accordingly in code
+for (i in 1:nrow(analysis_dataset)) {
+  if (analysis_dataset$`consensus_seq`[i] == "a") {
+    analysis_dataset$`n_a_t`[i] = analysis_dataset$t[i]
+    analysis_dataset$`n_a_c`[i] = analysis_dataset$c[i]
+    analysis_dataset$`n_a_g`[i] = analysis_dataset$g[i]
+  }
+  if (analysis_dataset$`consensus_seq`[i] == "t") {
+    analysis_dataset$`n_t_a`[i] = analysis_dataset$a[i]
+    analysis_dataset$`n_t_c`[i] = analysis_dataset$c[i]
+    analysis_dataset$`n_t_g`[i] = analysis_dataset$g[i]
+  }
+  if (analysis_dataset$`consensus_seq`[i] == "c") {
+    analysis_dataset$`n_c_t`[i] = analysis_dataset$t[i]
+    analysis_dataset$`n_c_a`[i] = analysis_dataset$a[i]
+    analysis_dataset$`n_c_g`[i] = analysis_dataset$g[i]
+  }
+  if (analysis_dataset$`consensus_seq`[i] == "g") {
+    analysis_dataset$`n_g_t`[i] = analysis_dataset$t[i]
+    analysis_dataset$`n_g_a`[i] = analysis_dataset$a[i]
+    analysis_dataset$`n_g_c`[i] = analysis_dataset$c[i]
+  }
+}
+
+
+# Cleaning Environment
+rm(list = c("i", "data_no_ref", "ref_sequence_name"))
+invisible(gc())
+```
+
+
+```{r}
+################################################################################
+#Step 3: FILTERING FOR FREQUENCY AND CREATING NEW FILTERED DATA FRAMES#
+################################################################################
+
+
+#filter rows based on frequency of mutation
+frequency_threshold <- c(50) 
+#Enter the raw number of mutations that represents the frequency threshold cutoff, i.e. 5% of 1000 = 50, so put in 50. Can analyse based on multiple frequency cutoffs by entering multiple cutoffs
+
+
+#for loop to loop through multiple frequency thresholds
+for (i in 1:length(frequency_threshold)) {#
+  #creating a filtered intermediate, where only columns starting with "n_" are filtered (mutation count columns only)
+  #all mutation count columns filtered at the same time
+  #If any position has a count in any column that is above the mutation frequency threshold, omit the position from analysis
+  filtered_intermediate <-  analysis_dataset %>%
+                              filter(if_all(starts_with("n_"), ~ . <= frequency_threshold[i]))
+  
+  #make a new data frame for the filtered results of each frequency threshold (high freq mutation sites omitted)
+  #each data set will be named "frequency_threshold" followed by the frequency threshold, for instance, frequency_threshold50
+  assign(paste("filtered_freq_", (frequency_threshold[i]), sep = ""), filtered_intermediate)
+}
+
+#cleaning up environment
+rm(list = c("i", "frequency_threshold", "filtered_intermediate"))
+invisible(gc())
+
+```
+
+
+
+
+```{r}
+#######################################################################################
+#ALTERNATIVELY - DATA WRANGLE THE PRE-WRANGLED & FILTERED DATASETS FROM SEQUENCE COUNT#
+#######################################################################################
+
+directory_path <- "C:/Users/1044832/Desktop/Analysis/3. Sequence change (against outlier)/clade_against_consensus/DATA/raw mutation count filtered at 5% freq threshold"
+
+# List all CSV files in the directory
+csv_files <- list.files(directory_path, pattern = "*.csv", full.names = TRUE)
+
+for (csv_file in csv_files) {
+  file_name <- basename(csv_file)
+  data_frame_name <- tools::file_path_sans_ext(file_name)
+  assign(data_frame_name, read.csv(csv_file))
+}
+
+#Clean up
+dflist <- ls()[sapply(ls(), function(x) is.data.frame(get(x)))]
+rm(list=setdiff(ls(), dflist))
+
+
+
+#Remove unnecessary rows for all data frames
+dflist <- ls()[sapply(ls(), function(x) is.data.frame(get(x)))]
+
+for(df in dflist){
+  currentdf <- get(df)
+  currentdf <- currentdf[, -(1:3)]
+  colnames(currentdf)[colnames(currentdf) == "X."] <- "x"
+  colnames(currentdf) <- gsub("\\.", "_", colnames(currentdf))
+  assign(df, currentdf)
+}
+
+#Clean up
+data_frame_names <- Filter(function(x) is.data.frame(get(x)), ls(pattern = "_df$"))
+rm(list = setdiff(ls(), data_frame_names))
+
+
+
+
+
+#Sum all data frames across rows by "position" column"
+
+data_frames <- list(filtered_freq_G_df, filtered_freq_GH_df, filtered_freq_GK_df, filtered_freq_GR_df, filtered_freq_GRA_df, filtered_freq_GRY_df, filtered_freq_GV_df, filtered_freq_L_df, filtered_freq_O_df, filtered_freq_S_df, filtered_freq_V_df) 
+
+# Function to sum numbers by position
+sum_by_position <- function(data_frames) {
+  # Combine all data frames into a single data frame
+  combined_df <- do.call(rbind, data_frames)
+  
+  # Get unique column names to sum
+  column_names <- unique(names(combined_df)[-1])
+  
+  # Create an empty output data frame
+  output_df <- data.frame(position = character(), stringsAsFactors = FALSE)
+  
+  # Sum the numbers by position for each column
+  for (col_name in column_names) {
+    summed_df <- combined_df %>%
+      group_by(position) %>%
+      summarise(across(all_of(col_name), sum), .groups = "drop")
+    
+    # Add the summed column to the output data frame
+    output_df <- merge(output_df, summed_df, by = "position", all = TRUE)
+  }
+  
+  return(output_df)
+}
+
+# Call the function
+result <- sum_by_position(data_frames)
+
+filtered_freq_50 <- result
+rm(list = setdiff(ls(), c("filtered_freq_50")))
+gc()
+
+```
+
+
+```{r}
+######################################################################
+#Step 1: IMPORTING WRANGLED .CT FILES AND MODIFYING DATA FOR ANALYSIS#
+######################################################################
+
+#Unfortunately, the original paper only produced the folded drawings of RNA structure up until 21600 (all of ORF1ab), so one data set will have all the detailed structural information, while the other data set will simply state whether the RNA is double stranded (ds), or single stranded (ss)
+
+strudata<- read_excel("C:/Users/1044832/Desktop/Analysis/Secondary structure analysis/Edited secondary structure information/data_all_no_structural_details.xlsx")
+
+
+#assign "ds" to the double stranded RNA positions in data
+strudata[strudata[, 3] != 0, 5] <- "ds"
+
+#assign "ss" to the single stranded RNA positions in data
+strudata[, 5][is.na(strudata[, 5])] <- "ss"
+
+#assign "loop" to all the N/A entries in the structure column (all links and stems have already been labeled) up until the 21600th position
+strudata[1:21600, 4][is.na(strudata[1:21600, 4])] <- "loop"
+
+#optional: save the new data frame
+#write.csv(strudata, "fully_annotated_secondary_structure_data.csv")
+
+```
+
+
+```{r}
+################################################################################
+#Step 4: MERGING SEQUENCE CHANGE DATA WITH STRUCTURAL DATA#
+################################################################################
+
+#Merging structural data frame and filtered frequency data frame analysis columns into new data frame
+stru_analysis <- data.frame()
+
+#Extracting all sequence change counts from the filtered data set
+tmp <- filtered_freq_50[(ncol(filtered_freq_50)-18): ncol(filtered_freq_50)]
+
+#Merging strudata with the sequence change data from filtered_freq data set. Note that since 1. any insertions the original data set had already been filtered based on mutation frequency, this code will insert rows with "NA" if there is a base in WT that is not present in the 
+stru_analysis <- full_join(tmp, strudata, by = "position")
+
+#Renaming the "base" column to "WT base"
+colnames(stru_analysis)[colnames(stru_analysis) == "base"] <- "WT_base"
+
+
+
+#Clean up environment
+rm(list = c("data", "tmp", "strudata"))
+invisible(gc())
+```
+
+
+```{r}
+################################################################################
+#Step 5: COUNTING ALL MUTATIONS/BASES BASED ON SECONDARY STRUCTURE CONTEXT#
+################################################################################
+
+#Specify the columns in stru_analysis to analyse
+column_names <- colnames(stru_analysis[8:19])
+#Initiating a data frame to store analysis results
+stru_analysis_output <- data.frame(secondary_structure = c("ds", "ss", "link", "loop", "stem"))
+
+
+#Summing total counts of mutations in each type of structural context
+for (i in column_names) {
+  #First aggregation: summing all sequence change columns by strandedness (ds or ss) and outputting into tmpa
+  formula1 <- as.formula(paste(i, "~ ds_or_ss"))
+  tmpa <- aggregate(formula1, data = stru_analysis, FUN = sum)
+  colnames(tmpa) <- c("secondary_structure", paste0("sum_", i))
+  
+  #Second aggregation: summing all sequence change columns by secondary structure (link, loop or stem) and outputting into tmpb
+  formula2 <- as.formula(paste(i, "~ structure"))
+  tmpb <- aggregate(formula2, data = stru_analysis, FUN = sum)
+  colnames(tmpb) <- c("secondary_structure", paste0("sum_", i))
+  
+  #Creating a new temporary data frame (tmpc) to merge the rows of tmpa and tmpb
+  tmpc <- rbind(tmpa, tmpb)
+  
+  #Add all data in tmpc into the permanent data frame "stru_analysis_output", merging by the secondary_structure column
+  stru_analysis_output <- merge(stru_analysis_output, tmpc, by = "secondary_structure")
+}
+
+
+
+#To nomarlise for relative frequency dependent on the frequency of each base in each type of secondary structure, count the number of bases in secondary structures in data set and add to the stru_analysis_output data frame
+
+#initialising data frame with all different bases
+bases <- c("a", "c", "g", "t")
+
+#looping though all bases
+for (i in bases) {
+  #initiate temporary data frame
+  tmp <- data.frame()
+  
+  #Subset the data frame for entries matching "ds", "ss", "link", "loop", or "stem", omitting the NAs 
+  ds_sum_tmp <- sum(subset(stru_analysis, ds_or_ss == "ds")[[i]], na.rm = TRUE)
+  ss_sum_tmp <- sum(subset(stru_analysis, ds_or_ss == "ss")[[i]], na.rm = TRUE)
+  link_sum_tmp <- sum(subset(stru_analysis, structure == "link")[[i]], na.rm = TRUE)
+  loop_sum_tmp <- sum(subset(stru_analysis, structure == "loop")[[i]], na.rm = TRUE)
+  stem_sum_tmp <- sum(subset(stru_analysis, structure == "stem")[[i]], na.rm = TRUE)
+  
+  #assign all sums into temporary data frame to make adding to the analysis output data easier
+  tmp <- data.frame(secondary_structure = c("ds", "ss", "link", "loop", "stem"), 
+                    value = c(ds_sum_tmp, ss_sum_tmp, link_sum_tmp, loop_sum_tmp, stem_sum_tmp))
+  
+  #renaming temporary data frame column names to reflect the current base
+  colnames(tmp) <- c("secondary_structure", paste0("n_", i, "_all"))
+  
+  #add tmp to analysis output
+  stru_analysis_output <- merge(stru_analysis_output, tmp, by = "secondary_structure")
+}
+
+
+
+
+#Clean up environment
+rm(list = c("tmp", "tmpa", "tmpb", "tmpc", "bases", "column_names", "ds_sum_tmp", "formula1", "formula2", "i", "link_sum_tmp", "loop_sum_tmp", "ss_sum_tmp", "stem_sum_tmp"))
+
+invisible(gc())
+
+```
+
+
+```{r}
+#######################################################################################################################
+#Step 6: CALCULATING NORMALISED MUTATION FREQUENCY RATIO FOR EACH TYPE OF STRUCTURE, CONFIDENCE INTERVAL, AND PLOTTING#
+#######################################################################################################################
+
+#[[[[C > U MUTATIONS]]]]#
+
+#Extract only the C>U mutation counts and the nC_all counts
+c_u_ratios <- data.frame()
+c_u_ratios <- cbind(stru_analysis_output$secondary_structure, stru_analysis_output$sum_n_c_t, stru_analysis_output$n_c_all)
+colnames(c_u_ratios) <- c("structure", "sum_n_c_t", "n_c_all")
+
+#Creating new data frame to store confidence interval calculation results
+df_ci <- data.frame()
+
+#For loop to loop through all different types of secondary structure, calculate their confidence intervals, and output the upper and lower bounds into df_ci
+for (row in 1:nrow(c_u_ratios)) {
+  #Get the x and n values for the current row
+  x <- as.numeric(c_u_ratios[row, 2]) #x is the number of mutations in the secondary structure
+  n <- as.numeric(c_u_ratios[row, 3]) #n is the total number of bases in the secondary structure 
+    
+  #Calculate the confidence interval
+  result <- prop.test(x, n, conf.level = 0.95, correct = FALSE)$conf.int
+    
+  #Add results to the df_ci data frame
+  df_ci <- rbind(df_ci, data.frame(
+    structure = c_u_ratios[row, 1],
+    CI95_lower = result[1],
+    CI95_upper = result[2]
+    ))
+}
+
+#Merge df_ci into c_u_ratios to make plotting easier
+c_u_ratios <- merge(c_u_ratios, df_ci, by = "structure")
+
+#Calculating the normalised frequency ratio
+c_u_ratios$normalised_ratio <- as.numeric(c_u_ratios$sum_n_c_t)/as.numeric(c_u_ratios$n_c_all)
+
+#Adding label to c_u_ratios for plotting
+c_u_ratios$type <- NA 
+c_u_ratios[1, 7] <- "Strandedness"
+c_u_ratios[4, 7] <- "Strandedness"
+c_u_ratios$type[is.na(c_u_ratios$type)] <- "Structure"
+
+c_u_ratios$CI95_lower <- (c_u_ratios$CI95_lower) * 100
+c_u_ratios$CI95_upper <- (c_u_ratios$CI95_upper) * 100
+c_u_ratios$normalised_ratio <- (c_u_ratios$normalised_ratio) * 100
+colnames(c_u_ratios)[colnames(c_u_ratios) == "normalised_ratio"] <- "percent"
+
+
+# Define the desired order of the bars for each facet
+structure_order <- c("ds", "ss", "stem", "link", "loop")
+
+#Plot
+ggplot(c_u_ratios, aes(x = factor(structure, levels = structure_order), y = percent, fill = structure)) +
+  theme_bw() +
+  geom_col(position = position_dodge(), color  = "black") +
+  theme(legend.position = "none") +
+  labs(y = "Percent C mutated in given context (%)", x = NULL) +
+  geom_errorbar(aes(ymin = CI95_lower, ymax = CI95_upper), width = 0.2, size = 1, position = position_dodge(0.9)) +
+  facet_grid(~type, scales = "free", space = "free_x") +
+  theme(strip.placement = "outside") +
+  scale_fill_manual(values = c("#d53e4f", "#5FA6D1", "#356E90", "#3288bd", "#9D0E1E"))+
+  theme(plot.margin = margin(t = 1, b = 1, l = 1.25, r = 1.25))+
+  theme(axis.text.x = element_text(size = 14))+
+  theme(axis.text.y = element_text(size = 12))+
+  theme(axis.title.y = element_text(size = 14, face = "bold"))+
+  theme(strip.text = element_text (size = 13, face = "bold"))+
+  coord_cartesian(ylim = c(0, 0.1))
+
+
+#Save plot
+ggsave(plot = last_plot(), file = "structure_preference_n11000.png", 
+       width = 9.5, height = 5, units = "in", dpi = 600)
+
+#Save data
+write.csv(c_u_ratios, file = "cu_mutations_secondary_structure_preference_n11000_f0.05.csv", row.names = FALSE)
+
+
+
+#Z tests
+#ds aginst ss
+prop.test(x = c(11335, 20662), n = c(36833830, 23122656), alternative = "two.sided", correct = FALSE)
+#link vs loop
+prop.test(x = c(2428, 11195), n = c(3186921, 12476165), alternative = "two.sided", correct = FALSE)
+#link vs stem
+prop.test(x = c(2428, 11335), n = c(3186921, 36833830), alternative = "two.sided", correct = FALSE)
+#loop vs stem
+prop.test(x = c(11335, 11195), n = c(36833830, 12476165), alternative = "two.sided", correct = FALSE)
+
+
+
+
+
+
+#Clean up environment
+rm(list = c("df_ci", "n", "result", "row", "x", "c_u_ratios"))
+invisible(gc())
+
+```
+
+
+```{r}
+#What about another type of mutation, say G>A?
+
+
+#Extract only the G>A mutation counts and the nC_all counts
+g_a_ratios <- data.frame()
+g_a_ratios <- cbind(stru_analysis_output$secondary_structure, stru_analysis_output$sum_n_g_a, stru_analysis_output$n_g_all)
+colnames(g_a_ratios) <- c("structure", "sum_n_g_a", "n_g_all")
+
+
+#Creating new data frame to store CI calculation results
+df_ci <- data.frame()
+
+
+for (row in 1:nrow(g_a_ratios)) {
+  # Get the x and n values for the current column and row
+  x <- as.numeric(g_a_ratios[row, 2])
+  n <- as.numeric(g_a_ratios[row, 3])
+    
+  # Calculate the confidence interval
+  result <- prop.test(x, n, conf.level = 0.95, correct = FALSE)$conf.int
+    
+  # Append the results to the data frame
+  df_ci <- rbind(df_ci, data.frame(
+    structure = g_a_ratios[row, 1],
+    CI95_lower = result[1],
+    CI95_upper = result[2]
+    ))
+}
+
+g_a_ratios <- merge(g_a_ratios, df_ci, by = "structure")
+g_a_ratios$normalised_ratio <- as.numeric(g_a_ratios$sum_n_g_a)/as.numeric(g_a_ratios$n_g_all)
+g_a_ratios$type <- NA 
+g_a_ratios[1, 7] <- "Strandedness"
+g_a_ratios[4, 7] <- "Strandedness"
+g_a_ratios$type[is.na(g_a_ratios$type)] <- "Structure"
+
+
+g_a_ratios$CI95_lower <- (g_a_ratios$CI95_lower) * 100
+g_a_ratios$CI95_upper <- (g_a_ratios$CI95_upper) * 100
+g_a_ratios$normalised_ratio <- (g_a_ratios$normalised_ratio) * 100
+colnames(g_a_ratios)[colnames(g_a_ratios) == "normalised_ratio"] <- "percent"
+
+
+# Define the desired order of the bars for each facet
+structure_order <- c("ds", "ss", "stem", "link", "loop")
+
+ggplot(g_a_ratios, aes(x = factor(structure, levels = structure_order), y = percent, fill = structure)) +
+  theme_bw() +
+  geom_col(position = position_dodge(), color = "black") +
+  theme(legend.position = "none") +
+  labs(y = "Normalised Ratio of A>G Mutations", x = NULL) +
+  geom_errorbar(aes(ymin = CI95_lower, ymax = CI95_upper), width = 0.2, size = 1, position = position_dodge(0.9)) +
+  facet_grid(~type, scales = "free", space = "free_x") +
+  theme(strip.placement = "outside") +
+  scale_fill_manual(values = c("#d53e4f", "#5FA6D1", "#356E90", "#3288bd", "#9D0E1E"))+
+  theme(plot.margin = margin(t = 1, b = 1, l = 1.25, r = 1.25))+
+  theme(axis.text.x = element_text(size = 14))+
+  theme(axis.text.y = element_text(size = 12))+
+  theme(axis.title.y = element_text(size = 14, face = "bold"))+
+  theme(strip.text = element_text (size = 13, face = "bold"))+
+  coord_cartesian(ylim = c(0, 0.1))
+
+
+ggsave(plot = last_plot(), file = "GA_structure_preference_n11000.png", 
+       width = 9.5, height = 5, units = "in", dpi = 600)
+
+write.csv(g_a_ratios, file = "GA_mutation_secondary_structure_preference_n11000_f0.05.csv", row.names = FALSE)
+
+
+#Z tests
+#ds aginst ss
+prop.test(x = c(3853, 1685), n = c(46198454, 17988780), alternative = "two.sided", correct = FALSE)
+#link vs loop
+prop.test(x = c(238, 826), n = c(2940458, 11085280), alternative = "two.sided", correct = FALSE)
+#link vs stem
+prop.test(x = c(238, 3853), n = c(2940458, 46198454), alternative = "two.sided", correct = FALSE)
+#loop vs stem
+prop.test(x = c(826, 3853), n = c(11085280, 46198454), alternative = "two.sided", correct = FALSE)
+
+
+
+
+#Clean up environment
+rm(list = c("df_ci", "n", "result", "row", "x", "g_a_ratios"))
+invisible(gc())
+
+```
+
+
+```{r}
+
+#######################################################################################################################
+#Step 7: C>U PREFERENCE FOR SS RNA, BUT WHERE EXACTLY IN THE SS RNA? (POSITION IN SECONDARY STRUCTURE)#
+#######################################################################################################################
+
+#Create a new data frame to store the results
+ss_position <- data.frame(position = as.numeric(), structure = as.character(), ss_before = as.numeric(), ss_after = as.numeric())
+
+
+for (i in 1:nrow(stru_analysis)) {
+  # Check for missing values in n_c_t column
+  if (!is.na(stru_analysis$n_c_t[i]) && stru_analysis$n_c_t[i] != 0 && stru_analysis$ds_or_ss[i] == "ss") {
+    # Determine the number of repetitions based on n_c_t
+    repetitions <- stru_analysis$n_c_t[i]
+    
+    # Perform counting and add rows based on repetitions
+    for (j in 1:repetitions) {
+      # Count occurrences of "ss" before the current row until the next "ds"
+      ss_before <- 0
+      for (k in (i-1):1) {
+        if (stru_analysis$ds_or_ss[k] == "ds") {
+          break
+        } else if (stru_analysis$ds_or_ss[k] == "ss") {
+          ss_before <- ss_before + 1
+        }
+      }
+      
+      # Count occurrences of "ss" after the current row until the next "ds"
+      ss_after <- 0
+      for (k in i+1:nrow(stru_analysis)) {
+        if (stru_analysis$ds_or_ss[k] == "ds") {
+          break
+        } else if (stru_analysis$ds_or_ss[k] == "ss") {
+          ss_after <- ss_after + 1
+        }
+      }
+      
+      # Append the row to the new data frame
+      ss_position <- rbind(ss_position, data.frame(position = stru_analysis$position[i],
+                                                   structure = stru_analysis$structure[i],
+                                                   ss_before = ss_before,
+                                                   ss_after = ss_after,
+                                                   stringsAsFactors = FALSE))
+    }
+  }
+}
+
+# Reset row names in the new data frame
+rownames(ss_position) <- NULL
+
+
+#adding a total length of ss structure column to the data frame
+ss_position$total_ss_length <- ss_position$ss_after + ss_position$ss_before + 1
+ss_position$structure[is.na(ss_position$structure)] <- "NA"
+ss_position$ss_before <- as.numeric(ss_position$ss_before)
+
+
+#calculating a relative position (at which percentile of the total structure is the mutation sitting?)
+ss_position$relative_mut_position <- (ss_position$ss_before + 1)/ss_position$total_ss_length
+
+
+ss_position <- ss_position %>% filter(total_ss_length > 2)
+
+#Plotting relative mutation position (0 = first position, 0.5 = middle, 1 = last position)
+ggplot(ss_position, aes(relative_mut_position, fill = cut(relative_mut_position, 100))) +
+  geom_histogram(show.legend = FALSE, binwidth = 0.05)+
+  theme_bw()+
+  scale_fill_discrete(h = c(180, 360), c = 120, l = 70)+
+  labs(x = "Relative Mutation Position", 
+       y = "Count")+
+  theme(axis.text = element_text(size = 12))+
+  theme(axis.title = element_text(size = 14, face = "bold"))
+  
+
+#Save plot
+ggsave(plot = last_plot(), file = "leng2_CU_ss_relative_mut_positions_n11000.png", 
+       width = 10, height = 5, units = "in", dpi = 600)
+
+
+
+
+#Plotting length of ss structure with C>U mutation
+ggplot(ss_position, aes(total_ss_length)) +
+  geom_histogram(show.legend = FALSE, fill = "cyan3", color = "deepskyblue3", binwidth = 1)+
+  theme_bw()+
+  labs(x = "Length (nt)", 
+       y = "Count")+
+  theme(axis.text = element_text(size = 12))+
+  theme(axis.title = element_text(size = 14, face = "bold"))
+
+#Save plot
+ggsave(plot = last_plot(), file = "ss_length_n11000_against_75_consensus.png", 
+       width = 9.5, height = 5, units = "in", dpi = 600)
+
+
+#Raw count of how many mutations are in each RNA structure position
+ss_position$mutation_position <- ss_position$ss_before + 1
+
+
+ggplot(ss_position, aes(mutation_position))+
+  geom_histogram()
+
+
+write.csv(ss_position, file = "CU_relative_mutation_position_single_stranded_regions.csv")
+
+#Clean up environment
+rm(list = c("i", "j", "k", "repetitions", "ss_after", "ss_before", "structure_order"))
+invisible(gc())
+```
+
+
+```{r}
+#######################################################################################################################
+#Step 8: SAME AS ABOVE, BUT FOR LOOPS RATHER THAN ALL SINGLE-STRANDED REGIONS#
+#######################################################################################################################
+
+loop_position <- data.frame()  # Initialize an empty data frame to store results
+
+for (i in 1:nrow(stru_analysis)) {
+  # Check for missing values in n_c_t column
+  if (!is.na(stru_analysis$n_c_t[i]) && !is.na(stru_analysis$structure[i]) && stru_analysis$n_c_t[i] != 0 && stru_analysis$structure[i] == "loop") {
+    # Determine the number of repetitions based on n_c_t
+    repetitions <- stru_analysis$n_c_t[i]
+    
+    # Perform counting and add rows based on repetitions
+    for (j in 1:repetitions) {
+      # Count occurrences of "loop" before the current row until the next not "loop"
+      loop_before <- 0
+      for (k in (i-1):1) {
+        if (is.na(stru_analysis$structure[k]) || stru_analysis$structure[k] != "loop") {
+          break
+        } else if (stru_analysis$structure[k] == "loop") {
+          loop_before <- loop_before + 1
+        }
+      }
+      
+      # Count occurrences of "ss" after the current row until the next "ds"
+      loop_after <- 0
+      for (k in (i+1):nrow(stru_analysis)) {
+        if (is.na(stru_analysis$structure[k]) || stru_analysis$structure[k] != "loop") {
+          break
+        } else if (stru_analysis$structure[k] == "loop") {
+          loop_after <- loop_after + 1
+        }
+      }
+      
+      # Append the row to the new data frame
+      loop_position <- rbind(loop_position, data.frame(position = stru_analysis$position[i],
+                                                       structure = stru_analysis$structure[i],
+                                                       loop_before = loop_before,
+                                                       loop_after = loop_after,
+                                                       stringsAsFactors = FALSE))
+    }
+  }
+}
+
+#Reset row names in the new data frame
+rownames(loop_position) <- NULL
+
+
+#adding a total length of ss structure column to the data frame
+loop_position$total_loop_length <- loop_position$loop_after + loop_position$loop_before + 1
+loop_position$structure[is.na(loop_position$structure)] <- "NA"
+loop_position$loop_before <- as.numeric(loop_position$loop_before)
+
+
+#calculating a relative position (at which percentile of the total structure is the mutation sitting?)
+loop_position$relative_mut_position <- (loop_position$loop_before + 1)/loop_position$total_loop_length
+
+
+
+#Plotting relative mutation position (0 = first position, 0.5 = middle, 1 = last position)
+ggplot(loop_position, aes(relative_mut_position, fill = cut(relative_mut_position, 100))) +
+  geom_histogram(show.legend = FALSE)+
+  theme_bw()+
+  scale_fill_discrete(h = c(180, 360), c = 120, l = 70)+
+  labs(x = "Relative Mutation Position", 
+       y = "Count")+
+  theme(axis.text = element_text(size = 12))+
+  theme(axis.title = element_text(size = 14, face = "bold"))
+
+#Save plot
+ggsave(plot = last_plot(), file = "loop_relative_mut_positions_n11000_against_75_consensus.png", 
+       width = 9.5, height = 5, units = "in", dpi = 600)
+
+
+
+
+#Plotting length of ss structure with C>U mutation
+ggplot(loop_position, aes(total_loop_length)) +
+  geom_histogram(show.legend = FALSE, fill = "cyan3", color = "deepskyblue3", binwidth = 1)+
+  theme_bw()+
+  labs(x = "Length (nt)", 
+       y = "Count")+
+  theme(axis.text = element_text(size = 12))+
+  theme(axis.title = element_text(size = 14, face = "bold"))
+
+#Save plot
+ggsave(plot = last_plot(), file = "loop_length_n11000_against_75_consensus.png", 
+       width = 9.5, height = 5, units = "in", dpi = 600)
+
+
+write.csv(loop_position, file = "CU_relative_mutation_position_loop_regions.csv")
+
+#Clean up environment
+rm(list = c("i", "j", "k", "repetitions", "loop_after", "loop_before", "structure_order"))
+invisible(gc())
+```
+
+
+```{r}
+
+#######################################################################################################################
+#Step 7: G>A PREFERENCE FOR SS RNA, BUT WHERE EXACTLY IN THE SS RNA? (POSITION IN SECONDARY STRUCTURE)#
+#######################################################################################################################
+
+#Create a new data frame to store the results
+ga_ss_position <- data.frame(position = as.numeric(), structure = as.character(), ss_before = as.numeric(), ss_after = as.numeric())
+
+
+for (i in 1:nrow(stru_analysis)) {
+  # Check for missing values in n_c_t column
+  if (!is.na(stru_analysis$n_c_a[i]) && stru_analysis$n_c_a[i] != 0 && stru_analysis$ds_or_ss[i] == "ss") {
+    # Determine the number of repetitions based on n_c_t
+    repetitions <- stru_analysis$n_c_a[i]
+    
+    # Perform counting and add rows based on repetitions
+    for (j in 1:repetitions) {
+      # Count occurrences of "ss" before the current row until the next "ds"
+      ss_before <- 0
+      for (k in (i-1):1) {
+        if (stru_analysis$ds_or_ss[k] == "ds") {
+          break
+        } else if (stru_analysis$ds_or_ss[k] == "ss") {
+          ss_before <- ss_before + 1
+        }
+      }
+      
+      # Count occurrences of "ss" after the current row until the next "ds"
+      ss_after <- 0
+      for (k in i+1:nrow(stru_analysis)) {
+        if (stru_analysis$ds_or_ss[k] == "ds") {
+          break
+        } else if (stru_analysis$ds_or_ss[k] == "ss") {
+          ss_after <- ss_after + 1
+        }
+      }
+      
+      # Append the row to the new data frame
+      ga_ss_position <- rbind(ga_ss_position, data.frame(position = stru_analysis$position[i],
+                                                   structure = stru_analysis$structure[i],
+                                                   ss_before = ss_before,
+                                                   ss_after = ss_after,
+                                                   stringsAsFactors = FALSE))
+    }
+  }
+}
+
+# Reset row names in the new data frame
+rownames(ga_ss_position) <- NULL
+
+
+#adding a total length of ss structure column to the data frame
+ga_ss_position$total_ss_length <- ga_ss_position$ss_after + ga_ss_position$ss_before + 1
+ga_ss_position$structure[is.na(ga_ss_position$structure)] <- "NA"
+ga_ss_position$ss_before <- as.numeric(ga_ss_position$ss_before)
+
+
+#calculating a relative position (at which percentile of the total structure is the mutation sitting?)
+ga_ss_position$relative_mut_position <- (ga_ss_position$ss_before + 1)/ga_ss_position$total_ss_length
+
+ga_ss_position <- ga_ss_position %>% filter(total_ss_length > 2)
+
+
+#Plotting relative mutation position (0 = first position, 0.5 = middle, 1 = last position)
+ggplot(ga_ss_position, aes(relative_mut_position, fill = cut(relative_mut_position, 100))) +
+  geom_histogram(show.legend = FALSE, binwidth = 0.05)+
+  theme_bw()+
+  scale_fill_discrete(h = c(180, 360), c = 120, l = 70)+
+  labs(x = "Relative Mutation Position", 
+       y = "Count")+
+  theme(axis.text = element_text(size = 12))+
+  theme(axis.title = element_text(size = 14, face = "bold"))
+  
+
+#Save plot
+ggsave(plot = last_plot(), file = "CU_ss_relative_mut_positions_n11000.png", 
+       width = 10, height = 5, units = "in", dpi = 600)
+
+
+
+
+#Plotting length of ss structure with C>U mutation
+ggplot(ga_ss_position, aes(total_ss_length)) +
+  geom_histogram(show.legend = FALSE, fill = "cyan3", color = "deepskyblue3", binwidth = 1)+
+  theme_bw()+
+  labs(x = "Length (nt)", 
+       y = "Count")+
+  theme(axis.text = element_text(size = 12))+
+  theme(axis.title = element_text(size = 14, face = "bold"))
+
+#Save plot
+ggsave(plot = last_plot(), file = "ss_length_n11000_against_75_consensus.png", 
+       width = 9.5, height = 5, units = "in", dpi = 600)
+
+
+
+write.csv(ga_ss_position, file = "CU_relative_mutation_position_single_stranded_regions.csv")
+
+#Clean up environment
+rm(list = c("i", "j", "k", "repetitions", "ss_after", "ss_before", "structure_order"))
+invisible(gc())
+```
+
+
+
+############################################################################################################################
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+############################################################################################################################
+
+                                                      END OF ANALYSIS
+                                                      
+       Any code beyond this point doesn't necessarily need to be here/is saved in case it becomes useful at somepoint
+
+############################################################################################################################
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+############################################################################################################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[[[[[[SOME POSSIBLY USEFUL CODE?]]]]]]
+
+Chunk 1:
+Working out the ratio of C>U mutations / total Cs in specific secondary structures for each individual sequence
+Tried because was trying to work out a way to represent confidence on the ratios for 1000 sequences (used wilson's interval test instead)
+Didn't use because the C>U mutations are rare, especially after filtering based on a frequency threshold. Many of the ratios for individual sequences are just 0.
+```{r}
+#Counting the number of C>U mutations in each sequence and adding the counts to a long format data frame
+
+
+# Create an empty data frame
+cu_mut_count <- data.frame(sequence_name = character(), n_c_t = numeric(), position = character(), stringsAsFactors = FALSE)
+
+# Loop through each column starting from the third column
+for (j in 2:(ncol(filtered_freq_50) - 19)) {
+  # Loop through each row in the current column
+  for (i in 1:nrow(data)) {
+    # Check if the entry in the current column is "t" and the first column is "c"
+    if (data[i, 1] == "c" && data[i, j] == "t") {
+      #create a new row in cu_mut_count
+      cu_mut_count[nrow(cu_mut_count) + 1, "sequence_name"] <- colnames(data)[j]
+      cu_mut_count[nrow(cu_mut_count), "n_c_t"] <- 1
+      cu_mut_count[nrow(cu_mut_count), "position"] <- data$position[i]
+    }
+  }
+}
+
+
+#Sum all the mutations for each sequence and concatanate the all repeat rows for the same sequence into 1 row
+cu_mut_count <- cu_mut_count %>%
+  group_by(sequence_name, position) %>%
+  summarize(n_c_t_sum = sum(n_c_t))
+
+
+#add row with the structure information of each c>u mutation
+cu_mut_count_stru <- merge(cu_mut_count, strudata, by = "position")
+
+
+#new data frame with the count of c>u mutations in each type of structure (NA omitted)
+tmp_stru <- cu_mut_count_stru %>%
+  filter(structure != "N/A") %>%
+  group_by(sequence_name, structure) %>%
+  summarise(count = n()) %>%
+  pivot_wider(names_from = structure, values_from = count, values_fill = 0) %>%
+  group_by(sequence_name)
+
+#new data frame with the count of c>u mutations in each type of strandedness (NA omitted)
+tmp_strand <- cu_mut_count_stru %>%
+  filter(ds_or_ss != "N/A") %>%
+  group_by(sequence_name, ds_or_ss) %>%
+  summarise(count = n()) %>%
+  pivot_wider(names_from = ds_or_ss, values_from = count, values_fill = 0) %>%
+  group_by(sequence_name)
+
+
+cu_mut_count_stru_concat <- merge(tmp_stru, tmp_strand, by = "sequence_name")
+
+
+
+
+
+
+
+#Need to count the total number of Cs in each type of secondary structure for each sequence
+stru_filtered_freq_50 <- merge(filtered_freq_50, strudata, by = "position")
+
+c_stru_count_all <- data.frame(sequence_name = character(0),
+                               n_c_link = integer(0),
+                               n_c_loop = integer(0),
+                               n_c_stem = integer(0),
+                               n_c_ss = integer(0),
+                               n_c_ds = integer(0),
+                               stringsAsFactors = FALSE)
+
+for (i in colnames(stru_filtered_freq_50)[3:(ncol(stru_filtered_freq_50) - 22)]){
+  # sum all Cs in specific secondary structures and strandedness
+  n_c_link <- sum(grepl("c", stru_filtered_freq_50[[i]], ignore.case = TRUE) & stru_filtered_freq_50$structure == "link", na.rm = TRUE)
+  n_c_loop <- sum(grepl("c", stru_filtered_freq_50[[i]], ignore.case = TRUE) & stru_filtered_freq_50$structure == "loop", na.rm = TRUE)
+  n_c_stem <- sum(grepl("c", stru_filtered_freq_50[[i]], ignore.case = TRUE) & stru_filtered_freq_50$structure == "stem", na.rm = TRUE)
+  n_c_ss <- sum(grepl("c", stru_filtered_freq_50[[i]], ignore.case = TRUE) & stru_filtered_freq_50$ds_or_ss == "ss")
+  n_c_ds <- sum(grepl("c", stru_filtered_freq_50[[i]], ignore.case = TRUE) & stru_filtered_freq_50$ds_or_ss == "ds")
+  
+  # Create a new row in the new data frame
+  new_row <- data.frame(sequence_name = i, n_c_link = n_c_link, n_c_loop = n_c_loop, n_c_stem = n_c_stem, n_c_ss = n_c_ss, n_c_ds = n_c_ds,
+                        stringsAsFactors = FALSE)
+  
+  # Add the new row to the new data frame
+  c_stru_count_all <- rbind(c_stru_count_all, new_row)
+}
+
+
+
+# merge the c_stru_count_all data frame containing counts of all cs in specific secondary structures and the cu_mut_count_stru_concat data frame containing all of the mutations with their structural information
+
+cu_mut_analysis <- merge(cu_mut_count_stru_concat, c_stru_count_all, by = "sequence_name")
+
+
+
+
+
+
+#calculate the ratios
+cu_mut_analysis$r_link <- cu_mut_analysis$link/cu_mut_analysis$n_c_link
+
+  
+```
+
+
+
+Chunk 2:
+Some code to calculate the total base count regardless of mutation frequencies. Isn't really necessary but who can blame me for keeping it just in case?
+```{r}
+total_base_count <- data.frame(n_A=sum(filtered_freq_50$a), 
+                               n_C=sum(filtered_freq_50$c), 
+                               n_T=sum(filtered_freq_50$t), 
+                               n_G=sum(filtered_freq_50$g))
+```
+

@@ -1,0 +1,416 @@
+---
+title: "Untitled"
+output: html_document
+date: "2023-06-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(readxl)
+library(ggbreak)
+
+```
+
+
+
+MANDATORY DATA HANDLING
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#######################################################################################################
+DATA HANDLING TO LOAD SEQUENCES, MAKE CONSENSUS, ETC.
+#######################################################################################################
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Same across all analysis files
+
+
+
+```{r}
+
+################################################################################
+#STEP 1: READING SEQUENCES IN FROM FASTA FORMAT INTO DATA FRAME FOR ANALYSIS#
+################################################################################
+
+
+# Read in the file
+# readLines() creates a variable where each element contains a string for each line of the file
+
+
+#PLEASE ENTER THE FILE PATH OF THE SEQUENCE FILE HERE
+file_path <- "C:/Users/1044832/Desktop/aligned_clade/all_clades_no_gaps_aligned_with_dates.fasta"
+lines <- readLines(file_path)
+
+
+#Initialize empty vectors for names and sequences
+#Vectors need to be initialized prior to using in a loop
+names_list <- c()
+sequences_list <- c()
+
+#Initialize new variables to hold the current names and sequence before adding them to the list
+current_name <- ""
+current_sequence <- ""
+
+#names_list and current_name are initialised differently because current_name only needs to hold one name at a time (hence only needs to be a string) while all current_names will be added to names_list (hence it needs to be a character vector to hold multiple strings)
+
+
+# Parse the lines
+for (line in lines) { # goes through all the lines one by one 
+  if (substr(line, 1, 1) == ">") { #substr separates out the part of the string that is specified, if first character of line is equal to > (a names line), then
+    
+    # New name, save previous sequence
+    if (current_name != "") {
+      names_list <- c(names_list, current_name)
+      sequences_list <- c(sequences_list, current_sequence)
+    }
+    # Start new sequence with this name
+    current_name <- gsub('>', '', line) # removing >
+    current_sequence <- ""
+  } else {
+    # Add to current sequence
+    current_sequence <- paste(current_sequence, line, sep="")
+  }
+}
+
+# Save the last name and sequence
+names_list <- c(names_list, current_name)
+sequences_list <- c(sequences_list, current_sequence)
+
+# Create a data frame with the name and sequence information
+df <- data.frame(name = names_list, sequence = sequences_list)
+
+# Cleaning up
+# Removing unwanted variables
+rm(list = c("current_name", "current_sequence", "line", "lines", "names_list", "sequences_list"))
+# Garbage Collection = removing temporary memory
+invisible(gc())
+
+
+```
+
+
+```{r}
+
+################################################################################
+#STEP 2: SEPARATING OUT EACH POSITION INTO ITS OWN ROW#
+################################################################################
+
+#identify the max length of the sequences
+max_length <- max(str_length(df$sequence))
+
+#Making all the sequences the same length for unnest_longer(), if sequences are shorter than the max length, add enough - at the end to make them equivalent
+df$sequence <- str_pad(df$sequence, max_length, "right", "-")
+
+#Separating each nucleotide
+df$split <- strsplit(df$sequence, split="")
+
+#Removing sequence column as its no longer needed
+df.min <- subset(df, select = c("name", "split"))
+
+#Making species names the column names
+df.wide <- pivot_wider(df.min, names_from = name, values_from = split)
+
+#Seperating the list into individual rows
+data <- df.wide %>% unnest_longer(c(colnames(df.wide)))
+
+#Cleaning environment
+rm(list=setdiff(ls(), c("data")))
+invisible(gc())
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Analysis
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##################################################################################################################
+GENOME COMPOSITION WITH REGARD TO CODON POSITION
+##################################################################################################################
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Analysis workflow:
+
+#Step 1#
+Adding the codon position information to the main data set. The codon position and gene information is stored in the .csv file "wt_codon_annotated.csv". This file was previously produced using excel and code from the file "annotating_orf_info.Rmd" (see Codon usage analysis). There are 17 columns in this file. The first column contains the genome sequence of the WT WIV04 reference sequence.The second column indicates the position of each base. Columns 3-17 contain information about 1. where the gene is relative to the whole genome, and 2. the codon position of every base in the gene. Each gene is represented as a column, and the codon position of each base in the gene is annotated. In all other positions that do not belong to the gene in question, there is no codon position information, and all entries are NA. 
+
+#Step 2#
+Calculating nucleotide composition with regard to codon position. First, the large data frame "data" is filtered so that only rows (bases) where the entry in at least one of the gene columns is equal to a designated codon position (1, 2, or 3) is selected and pasted into a new data frame. From here on out, since the data frame is already filtered, all analysis will only be done on the bases that belong to a designated codon position. Next, a frequency table is created for each sequence in the filtered data frame to count the number of times A, C, T, G, N, and - occur. The frequency table of each sequence is pasted into data frame "base_count_codx" (x being the codon position being analysed). After creating the frequency table, a for loop loops through all sequences in the data frame to calculate the ratio of each base relative to all bases. Lastly, the results are pasted into the data frame "nucleotide_composition_codx". This output data frame has 5 columns: column 1 identifies the sequence, columns 2-5 contain the ratio of A, G, T, and C in the genome.
+
+#Step 3#
+Graphing and statistical tests. The genome composition ratio of each base is plotted in a scatter plot, x = sample collection date, y = ratio. A linear regression model is calculated between base ratio and sample collection date. The resulting regression line is plotted onto the graph. Each graph is also annotated with the r value and the slope of the linear regression.
+
+
+
+```{r}
+################################################################################
+#STEP 1: ADDING SECONDARY STRUCTURE INFORMATION#
+################################################################################
+
+#Read in strudata excel file
+strudata<- read_excel("C:/Users/1044832/Desktop/Analysis/Secondary structure analysis/Edited secondary structure information/data_all_no_structural_details.xlsx")
+
+#assign "ds" to the double stranded RNA positions in data
+strudata[strudata[, 3] != 0, 5] <- "ds"
+
+#assign "ss" to the single stranded RNA positions in data
+strudata[, 5][is.na(strudata[, 5])] <- "ss"
+
+#assign "loop" to all the N/A entries in the structure column (all links and stems have already been labeled) up until the 21600th position
+strudata[1:21600, 4][is.na(strudata[1:21600, 4])] <- "loop"
+
+#Filter out the required columns from strudata column
+strudata <- data.frame(position = strudata$position, structure = strudata$structure, ds_or_ss = strudata$ds_or_ss)
+
+#Add position column in data
+data$position <- seq(1,nrow(data),1)
+
+#Merge annotations with main data set
+data <- inner_join(data, strudata, by = "position")
+
+#data[, 11002:11017] <- lapply(data[, 11002:11017], as.numeric)
+
+#Cleaning up environment
+rm(wt_codon_annotations)
+invisible(gc())
+
+```
+
+
+```{r}
+################################################################################
+#STEP 2: CREATING FILTERED DATASETS BASED ON POSITION IN SS REGION#
+################################################################################
+
+# Create ss_pos_1: Rows with "ss" followed by "ds" (first single stranded base on 3' end), but only for single stranded regions that are longer than 2nt (excludes bulges)
+ss_pos_1 <- data[data$ds_or_ss == "ss" & lead(data$ds_or_ss) == "ds" & lag(data$ds_or_ss) != "ds" & lag(lag(data$ds_or_ss)) != "ds", ]
+
+# Create ss_pos_2: Rows with "ss", "ss", "ds" sequence (second single stranded base on 3' end)
+ss_pos_2 <- data[data$ds_or_ss == "ss" &
+                  lead(data$ds_or_ss) == "ss" &
+                  lead(data$ds_or_ss, 2) == "ds", ]
+
+# Create ss_pos_3: Rows with "ss", "ss", "ss", "ds" sequence (third single stranded base on 3' end)
+ss_pos_3 <- data[data$ds_or_ss == "ss" &
+                  lead(data$ds_or_ss) == "ss" &
+                  lead(data$ds_or_ss, 2) == "ss" &
+                  lead(data$ds_or_ss, 3) == "ds", ]
+
+```
+
+
+```{r}
+bases <- c("A", "C", "G", "T")
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#####First ss base in single-stranded region#####
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+
+#Creating a new data frame to hold nucleotide counts
+base_count_sspos1 <- data.frame()
+
+#Creating a frequency table of base occurrence for each sequence and pasting into the "base_count_sspos1" data frame
+for (i in colnames(ss_pos_1)[1:(ncol(ss_pos_1)-3)]) {
+  #create frequency table for each sequence
+  freq_table <- table(ss_pos_1[[i]]) 
+  #make a temp data frame to store all counts
+  freq_df <- data.frame(seq_name = paste(i), base = names(freq_table), count = as.numeric(freq_table))
+  #add all data in temp data frame into base_count_sspos1 data frame where all data is compiled for all sequences
+  base_count_sspos1 <- rbind(base_count_sspos1, freq_df) 
+}
+
+
+#create a list of all the sequence names
+all_seq_names <- unique(base_count_sspos1$seq_name)
+#initiate nucleotide composition data frame
+nucleotide_composition_sspos1 <- data.frame()
+
+
+
+#for loop to loop through all sequences and calculate nucleotide composition for each sequence
+for (i in all_seq_names) {
+  tmp_rows <- base_count_sspos1[base_count_sspos1[,1] == i,] #extract all rows that belong to a sequence
+  base_rows <- tmp_rows[tolower(tmp_rows[, 2]) %in% tolower(bases), ] #filter only for rows that contain counts of A, C, G, T (excludes - or N)
+  sum <- sum(base_rows[,3])
+  a_ratio <- base_rows[1, 3]/sum
+  c_ratio <- base_rows[2, 3]/sum
+  g_ratio <- base_rows[3, 3]/sum
+  t_ratio <- base_rows[4, 3]/sum
+  current_seq_name <- paste(i)
+  tmp_df <- data.frame(cbind(current_seq_name, a_ratio, c_ratio, g_ratio, t_ratio)) #temp data frame to store all counts
+  nucleotide_composition_sspos1 <- rbind(nucleotide_composition_sspos1, tmp_df) #merge
+}
+
+
+#convert the ratio columns into numeric columns
+nucleotide_composition_sspos1$a_ratio <- as.numeric(nucleotide_composition_sspos1$a_ratio)
+nucleotide_composition_sspos1$c_ratio <- as.numeric(nucleotide_composition_sspos1$c_ratio)
+nucleotide_composition_sspos1$g_ratio <- as.numeric(nucleotide_composition_sspos1$g_ratio)
+nucleotide_composition_sspos1$t_ratio <- as.numeric(nucleotide_composition_sspos1$t_ratio)
+
+#recognize the data id from the date path using regex and add the date to a new column in the data frame
+nucleotide_composition_sspos1$date <- str_extract(nucleotide_composition_sspos1$current_seq_name, "\\d{4}-\\d{2}-\\d{2}")
+nucleotide_composition_sspos1$date <- as.Date(nucleotide_composition_sspos1$date)
+nucleotide_composition_sspos1$date_numeric <- as.numeric(nucleotide_composition_sspos1$date)
+
+#Clear the environment
+rm(list = c("ss_pos_1", "df", "freq_df", "tmp_df", "tmp_rows", "a_ratio", "c_ratio", "g_ratio", "t_ratio", "all_seq_names", "current_seq_name", "freq_table", "i", "sum", "base_rows", "base_count_sspos1"))
+invisible(gc())
+
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#####General whole genome content#####
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+
+#Creating a new data frame to hold nucleotide counts
+base_count <- data.frame()
+
+#Creating a frequency table of base occurrence for each sequence and pasting into the "base_count_sspos1" data frame
+for (i in colnames(data)[1:(ncol(data)-3)]) {
+  #create frequency table for each sequence
+  freq_table <- table(data[[i]]) 
+  #make a temp data frame to store all counts
+  freq_df <- data.frame(seq_name = paste(i), base = names(freq_table), count = as.numeric(freq_table))
+  #add all data in temp data frame into base_count_sspos1 data frame where all data is compiled for all sequences
+  base_count <- rbind(base_count, freq_df) 
+}
+
+
+#create a list of all the sequence names
+all_seq_names <- unique(base_count$seq_name)
+#initiate nucleotide composition data frame
+nucleotide_composition_all <- data.frame()
+
+
+
+#for loop to loop through all sequences and calculate nucleotide composition for each sequence
+for (i in all_seq_names) {
+  tmp_rows <- base_count[base_count[,1] == i,] #extract all rows that belong to a sequence
+  base_rows <- tmp_rows[tolower(tmp_rows[, 2]) %in% tolower(bases), ] #filter only for rows that contain counts of A, C, G, T (excludes - or N)
+  sum <- sum(base_rows[,3])
+  a_ratio <- base_rows[1, 3]/sum
+  c_ratio <- base_rows[2, 3]/sum
+  g_ratio <- base_rows[3, 3]/sum
+  t_ratio <- base_rows[4, 3]/sum
+  current_seq_name <- paste(i)
+  tmp_df <- data.frame(cbind(current_seq_name, a_ratio, c_ratio, g_ratio, t_ratio)) #temp data frame to store all counts
+  nucleotide_composition_all <- rbind(nucleotide_composition_all, tmp_df) #merge
+}
+
+
+#convert the ratio columns into numeric columns
+nucleotide_composition_all$a_ratio <- as.numeric(nucleotide_composition_all$a_ratio)
+nucleotide_composition_all$c_ratio <- as.numeric(nucleotide_composition_all$c_ratio)
+nucleotide_composition_all$g_ratio <- as.numeric(nucleotide_composition_all$g_ratio)
+nucleotide_composition_all$t_ratio <- as.numeric(nucleotide_composition_all$t_ratio)
+
+#recognize the data id from the date path using regex and add the date to a new column in the data frame
+nucleotide_composition_all$date <- str_extract(nucleotide_composition_all$current_seq_name, "\\d{4}-\\d{2}-\\d{2}")
+nucleotide_composition_all$date <- as.Date(nucleotide_composition_all$date)
+nucleotide_composition_all$date_numeric <- as.numeric(nucleotide_composition_all$date)
+
+#Clear the environment
+rm(list = c("ss_pos_1", "df", "freq_df", "tmp_df", "tmp_rows", "a_ratio", "c_ratio", "g_ratio", "t_ratio", "all_seq_names", "current_seq_name", "freq_table", "i", "sum", "base_rows", "base_count_sspos1"))
+invisible(gc())
+
+
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~#
+#plotting the C ratios#
+#~~~~~~~~~~~~~~~~~~~~~#
+
+#Building plot data
+
+plot.data <- data.frame(data = c("genome", "sspos1"), mean_c = c("", ""), mean_t = c("", ""))
+plot.data[1, 2] <- mean(nucleotide_composition_all$c_ratio)
+plot.data[2, 2] <- mean(nucleotide_composition_sspos1$c_ratio)
+plot.data[1, 3] <- mean(nucleotide_composition_all$t_ratio)
+plot.data[2, 3] <- mean(nucleotide_composition_sspos1$t_ratio)
+
+# Calculate confidence intervals for mean
+ci_df1 <- t.test(nucleotide_composition_all$c_ratio)$conf.int
+ci_df2 <- t.test(nucleotide_composition_sspos1$c_ratio)$conf.int
+ci_df3 <- t.test(nucleotide_composition_all$t_ratio)$conf.int
+ci_df4 <- t.test(nucleotide_composition_sspos1$t_ratio)$conf.int
+
+# Create a new data frame with lower and upper bounds
+CI_lower <- data.frame(c_lower_bound = c(ci_df1[1], ci_df2[1]))
+CI_upper <- data.frame(c_upper_bound = c(ci_df1[2], ci_df2[2]))
+CI_lower2 <- data.frame(t_upper_bound = c(ci_df3[1], ci_df4[1]))
+CI_upper2 <- data.frame(t_upper_bound = c(ci_df3[2], ci_df4[2]))
+
+# Combine lower and upper bounds into a single data frame
+confidence_intervals <- cbind(CI_lower, CI_upper, CI_lower2, CI_upper2)
+
+#Bind with plot data
+plot.data <- cbind(plot.data, confidence_intervals)
+
+#Make everything numeric
+plot.data[, 2:6] <- plot.data[, 2:6] %>% mutate(across(everything(), as.numeric))
+write.csv(plot.data, file = "plot.data.csv")
+
+
+
+#Read in modified plot data
+plot.data <- read.csv("plot.data.csv")
+plot.data[, 3:5] <- plot.data[, 3:5] * 100
+
+plot <- ggplot(plot.data, aes(x = base, y = mean, fill = X)) +
+  geom_col(position = position_dodge(width = 0.6), color = "black", width = 0.6) +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper), position = position_dodge(width = 0.6), size = 1, width = 0.5) +
+  coord_cartesian(ylim = c(0, 45))+
+  theme_bw()+
+  scale_fill_manual(values = c("#006699", "#F0066F", "#70CFFF", "#FDB0D2"))+
+  theme(legend.position = "none")+
+  theme(axis.text.x = element_blank())+
+  theme(axis.title.x = element_blank())+
+  theme(axis.text.y = element_text(size = 12))+
+  theme(axis.title.y = element_text(size = 14, face = "bold"))+
+  labs(y = "Percent of nucleotide (%)")
+
+
+
+plot
+
+ggsave(plot, file = "plot.png", width = 8, height = 5, units = "in", dpi = 600)
+
+
+
+
+#t tests
+ccontent <- t.test(nucleotide_composition_all$c_ratio, nucleotide_composition_sspos1$c_ratio)
+ccontent
+
+tcontent <- t.test(nucleotide_composition_all$t_ratio, nucleotide_composition_sspos1$t_ratio)
+tcontent
+
+
+
+
+
+```
+
+
+
+
+
+
+

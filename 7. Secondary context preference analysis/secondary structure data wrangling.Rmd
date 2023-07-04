@@ -1,0 +1,182 @@
+---
+title: "secondary structure analysis"
+output: html_document
+date: "2023-05-01"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(readxl)
+library(readr)
+
+```
+
+
+```{r}
+#reading lines of structure file into R
+lines <- readLines("C:/Users/1044832/Desktop/SARS-CoV-2_SHAPE_MaP_structure-master/SHAPE-MaP_data/SARS-CoV-2_Full_Length_Secondary_Structure_Map - Copy.ct")
+
+#split the original document into character lists
+tmp <- str_split(lines[2], "\\s+")
+
+
+
+#FOR THE FIRST 9999 (original data has numbers in different columns)
+#initiate all lists
+position <- c()
+base <- c()
+pair <- c()
+
+#extract the first column (positions), second column (base), and sixth column (paired base) from each character list extracted from line
+for (i in 2:10000) {
+  line <- str_split(lines[i], "\\s+")
+  position <- append(position, line[[1]][2])
+  base <- append(base, line[[1]][3])
+  pair <- append(pair, line[[1]][6])
+}
+
+#making data frame
+data_1_9999 <- data.frame(position = position, base = base, pair = pair)
+#adding column to label all positions that are bound to another base (stem positions)
+data_1_9999$structure <- ifelse(data_1_9999$pair !=0, "stem", "")
+
+
+
+
+
+#FOR THE ROWS AFTER 10000 (original data has numbers in different columns)
+position2 <- c()
+base2 <- c()
+pair2 <- c()
+
+#extract the first column (positions), second column (base), and sixth column (paired base) from each character list extracted from line
+for (i in 10001:length(lines)) {
+  line2 <- str_split(lines[i], "\\s+")
+  position2 <- append(position2, line2[[1]][1])
+  base2 <- append(base2, line2[[1]][2])
+  pair2 <- append(pair2, line2[[1]][5])
+}
+
+#making data frame
+data_10000_on <- data.frame(position = position2, base = base2, pair = pair2)
+#adding column to label all positions that are bound to another base (stem positions)
+data_10000_on$structure <- ifelse(data_10000_on$pair !=0, "stem", "")
+
+
+
+
+
+
+
+write_csv(data_10000_on, "data2.csv")
+
+#Clean up environemnt
+rm(list = c("i", "tmp", "tmp2"))
+```
+
+```{r}
+#after some wrangling in excel (adding in the annotations for bits that are in linkers), need to label the remaining empty cells in structure column as bases in loops
+
+edited_data <- read_excel("Edited secondary structure information/data_21600­_with_structural_details.xlsx")
+edited_data$structure[is.na(edited_data$structure)] <- "loop"
+
+write.csv(edited_data, "final_data_21600_with_structural_details.csv")
+
+
+```
+
+
+
+
+```{r}
+
+#trying to plot all the RNA secondary structures from 21600 on but failing
+
+install.packages("ggseqlogo")
+library(ggseqlogo)
+
+
+plot.data <- read.table("C:/Users/1044832/Desktop/SARS-CoV-2_SHAPE_MaP_structure-master/SHAPE-MaP_data/SARS-CoV-2_Full_Length_Secondary_Structure_Map - Copy.ct", header = FALSE, skip = 1, stringsAsFactors = FALSE)
+bp <- plot.data[, c(1, 5)]
+colnames(bp) <- c("position", "bits")
+
+
+ggseqlogo(data = data.frame(seq = bp[, 1], secstruct = bp[, 2]),
+          aes(x = position, y = bits, fill = secstruct),
+          alphabet = "rna", stack_height = 0.7, with_text = FALSE, with_numbers = TRUE) +
+  theme(legend.position = "none")
+
+```
+
+
+
+
+```{r}
+#Day 2: secondary folding map only shown until 21600. Reformatting the rest of the 8000 odd bases in the CT file so that the sequence position number says "1" rather than 21600, since the RNA folding softwares do not handle more than 10000 bps (the programmes seem to recognize the length of the sequences base on position number rather than the actual length of the sequence)
+
+##nvm none of this actually works
+
+
+
+
+data.21600.on <- read.table("C:/Users/1044832/Desktop/Analysis/Secondary structure analysis/PAPER OG SARS-CoV-2_SHAPE_MaP_structure-master/SHAPE-MaP_data/SARS-CoV-2 SHAPE MaP pt2.ct", header = FALSE, skip = 1, stringsAsFactors = FALSE)
+
+edited.data.21600.on <- data.21600.on
+edited.data.21600.on[, 1] <- data.21600.on[, 1]-21599 
+edited.data.21600.on[, 3] <- data.21600.on[, 3]-21599 
+edited.data.21600.on[, 4] <- data.21600.on[, 4]-21599 
+edited.data.21600.on[, 6] <- data.21600.on[, 6]-21599 
+edited.data.21600.on$V5[edited.data.21600.on$V5 != 0] <- edited.data.21600.on$V5[edited.data.21600.on$V5 != 0] - 21599
+
+
+# Define a function to determine the delimiter for each entry in a row
+get_delim <- function(x) {
+  if (nchar(as.character(x)) == 1 & !is.na(x) & !is.character(x)) {
+    return("     ") # 5 spaces for 1-digit numbers
+  } else if (is.character(x) & !is.na(x)) {
+    return(" ") # 1 space for 1-letter characters
+  } else if (nchar(as.character(x)) == 2 & !is.na(x)) {
+    return("    ") # 4 spaces for 2-digit numbers
+  } else if (nchar(as.character(x)) == 3 & !is.na(x)) {
+    return("   ") # 3 spaces for 3-digit numbers
+  } else if (nchar(as.character(x)) == 4 & !is.na(x)) {
+    return("  ") # 2 spaces for 4-digit numbers
+  } else {
+    return("") # no delimiter for missing values
+  }
+}
+
+# Apply the function to each row of the data frame and concatenate the entries
+text_rows <- apply(edited.data.21600.on, 1, function(x) {
+  paste0(paste0(get_delim(x[1]), x[1]), 
+         get_delim(x[2]), x[2], 
+         get_delim(x[3]), x[3], 
+         get_delim(x[4]), x[4], 
+         get_delim(x[5]), x[5], 
+         get_delim(x[6]), x[6])
+})
+
+# Write the resulting text rows to a file with one row per line
+writeLines(text_rows, "output.txt")
+
+
+
+
+
+
+```
+
+```{r}
+
+#approach #2: changing the .ct file into a .db file
+
+
+
+
+```
+
+
+
+
