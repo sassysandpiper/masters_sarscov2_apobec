@@ -1,0 +1,12 @@
+,ratio,value,virus,CI_lower,CI_upper
+1,nrC>U,9.336220909,SARS-CoV-2,7.603756423,11.06868539
+2,nrG>A,0.998230443,SARS-CoV-2,0.875300196,1.121160691
+3,nrC>U,0.901955388,Sarbecoviruses,0.864226341,0.939684436
+4,nrG>A,0.67428434,Sarbecoviruses,0.609397165,0.739171516
+,,,,,
+,,,,,
+,P values,,,,
+,"sarbecovirus vs clade mean nrC>U, p = 7.494e-07 (****)",,,,
+,"sarbecovirus vs clade mean nrG>A, p = 0.0001346 (***)",,,,
+,"sarbecovirus nrC>U vs nrG>A, p = 0.0006823 (***)",,,,
+,"clade nrC>U vs nrG>A, p =  7.851e-07 (****)",,,,
