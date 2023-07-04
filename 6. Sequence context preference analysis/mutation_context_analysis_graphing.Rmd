@@ -1,0 +1,282 @@
+---
+title: "Untitled"
+output: html_document
+date: "2023-06-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rmarkdown)
+library(tidyverse)
+library(stringr)
+library(readxl)
+library(ggplot2)
+library(binom)
+
+```
+
+
+```{r}
+#############################################################################
+#STEP 1: IMPORT MUTATION CONTEXT DATA FOR PLOTING & ADD CONFIDENCE INTERVALS#
+#############################################################################
+data <- read.csv("mutation_context_analysis_n11000.csv")
+
+
+for (i in 1:nrow(data)) {
+  # Get the number of trials and successes for the current row
+  trials <- data$presumed_n_all[i]
+  successes <- data$matches[i]
+  
+  # Calculate the ratio
+  ratio <- successes / trials
+  
+  # Calculate the confidence interval using Wilson score interval
+  ci <- binom.confint(x = successes, n = trials, method = "wilson")
+  
+  # Extract the lower and upper bounds of the confidence interval
+  lower_bound <- ci$lower
+  upper_bound <- ci$upper
+  
+  # Assign the confidence interval bounds to the respective columns in the data frame
+  data$CI_lower[i] <- lower_bound
+  data$CI_upper[i] <- upper_bound
+}
+
+data <- data %>%
+  mutate_if(is.numeric, as.numeric)
+
+data <- data[, -1]
+
+data$relative_ratio <- data$relative_ratio * 100
+data$CI_lower <- as.numeric(data$CI_lower) * 100
+data$CI_upper <- as.numeric(data$CI_upper) * 100
+
+```
+
+
+```{r}
+#########################
+#PLOT ONE: DINUCLEOTIDES#
+#########################
+
+#Extract dinucleotide contexts
+di.plot.data <- data[nchar(data$pattern) == 2, ]
+di.plot.data$type[di.plot.data$analysis_context %in% grep("[a-z]x", di.plot.data$analysis_context, value = TRUE)] <- "5'"
+di.plot.data$type[di.plot.data$analysis_context %in% grep("x[a-z]", di.plot.data$analysis_context, value = TRUE)] <- "3'"
+di.plot.data$analysis_context <- toupper(di.plot.data$analysis_context)
+di.plot.data$analysis_context <- gsub("T", "U", di.plot.data$analysis_context)
+
+
+# Reorder the levels of 'type' variable
+di.plot.data$type <- factor(di.plot.data$type, levels = c("5'", "3'"))
+
+# Plot with reordered facets and custom fill colors
+dinucleotides <- ggplot(di.plot.data, aes(x = analysis_context, y = relative_ratio, fill = analysis_context)) +
+  geom_col(color = "black", width = 0.6) +
+  geom_errorbar(aes(x = analysis_context, ymin = CI_lower, ymax = CI_upper), width = 0.2, size = 1, color = "black") +
+  labs(x = "Analysis Context", y = "Percent of contexts mutated (%)") +
+  theme_bw() +
+  facet_grid(~ type, scales = "free", space = "free_x", labeller = labeller(type = c("5'" = "5' (Upstream)", "3'" = "3' (Downstream)"))) +
+  scale_fill_manual(values = c("#006699", "#FF6600", "#669900", "#FF006F", "#006699", "#FF6600", "#669900", "#FF006F"))+
+  theme(legend.position = "none")+
+  theme(axis.text = element_text(size = 12))+
+  theme(axis.title = element_text(size = 12, face = "bold"))+
+  theme(strip.text = element_text(size = 12, face = "bold"))+
+  labs(x = "C>U mutation context")
+
+write.csv(di.plot.data, file = "dinucleotide_context_plot.csv")
+ggsave(dinucleotides, file = "dinucleotide_context_preference.png", width = 8, height = 5, units = "in", dpi = 600)
+
+#Clean up environment
+rm(list = c("ci", "i", "lower_bound", "ratio", "successes", "trials", "upper_bound"))
+
+```
+
+
+```{r}
+##########################
+#PLOT TWO: TRINUCLEOTIDES#
+##########################
+
+#Extract dinucleotide contexts
+tri.plot.data <- data[nchar(data$pattern) == 3, ]
+tri.plot.data$analysis_context <- toupper(tri.plot.data$analysis_context)
+tri.plot.data$analysis_context <- gsub("T", "U", tri.plot.data$analysis_context)
+tri.plot.data$analysis_context <- reorder(tri.plot.data$analysis_context, -tri.plot.data$relative_ratio)
+
+
+# Plot with reordered facets and custom fill colors
+trinucleotides <- ggplot(tri.plot.data, aes(x = analysis_context, y = relative_ratio)) +
+  geom_col(color = "black", fill = "azure3", width = 0.6) +
+  geom_errorbar(aes(x = analysis_context, ymin = CI_lower, ymax = CI_upper), width = 0.2, size = 1, color = "black") +
+  theme_bw() +
+  theme(legend.position = "none")+
+  theme(axis.text.x = element_text(size = 12, angle = 90, vjust = 0.5))+
+  theme(axis.title = element_text(size = 12, face = "bold"))+
+  labs(x = "C>U mutation context", y = "Percent of contexts mutated (%)")
+
+write.csv(tri.plot.data, file = "trinucleotide_context_plot.csv")
+ggsave(trinucleotides, file = "trinucleotide_context_preference.png", width = 16, height = 5, units = "in", dpi = 600)
+
+
+#Clean up environment
+rm(list = c("ci", "i", "lower_bound", "ratio", "successes", "trials", "upper_bound"))
+
+trinucleotides
+
+
+
+
+##############
+#nCn contexts#
+##############
+
+ncn.plot.data <- data[grepl("^\\w[xX]\\w$", data$analysis_context), ]
+ncn.plot.data$analysis_context <- toupper(ncn.plot.data$analysis_context)
+ncn.plot.data$analysis_context <- gsub("T", "U", ncn.plot.data$analysis_context)
+ncn.plot.data$analysis_context <- reorder(ncn.plot.data$analysis_context, -ncn.plot.data$relative_ratio)
+
+
+# Plot with reordered facets and custom fill colors
+ncn <- ggplot(ncn.plot.data, aes(x = analysis_context, y = relative_ratio)) +
+  geom_col(color = "black", fill = "azure3", width = 0.6) +
+  geom_errorbar(aes(x = analysis_context, ymin = CI_lower, ymax = CI_upper), width = 0.2, size = 1, color = "black") +
+  theme_bw() +
+  theme(legend.position = "none")+
+  theme(axis.text.x = element_text(size = 12, angle = 90, vjust = 0.5))+
+  theme(axis.title = element_text(size = 12, face = "bold"))+
+  labs(x = "C>U mutation context", y = "Percent of contexts mutated (%)")
+
+ggsave(ncn, file = "ncn_context_preference.png", width = 8, height = 5, units = "in", dpi = 600)
+
+```
+
+```{r}
+##############################
+#PLOT THREE: TETRANUCLEOTIDES#
+##############################
+
+#Extract dinucleotide contexts
+tetra.plot.data <- data[nchar(data$pattern) == 4, ]
+tetra.plot.data$analysis_context <- toupper(tetra.plot.data$analysis_context)
+tetra.plot.data$analysis_context <- gsub("T", "U", tetra.plot.data$analysis_context)
+tetra.plot.data$analysis_context <- reorder(tetra.plot.data$analysis_context, -tetra.plot.data$relative_ratio)
+
+
+# Plot with reordered facets and custom fill colors
+tetranucleotides <- ggplot(tetra.plot.data, aes(x = analysis_context, y = relative_ratio)) +
+  geom_col(color = "black", fill = "azure3", width = 0.6) +
+  geom_errorbar(aes(x = analysis_context, ymin = CI_lower, ymax = CI_upper), width = 0.2, size = 1, color = "black") +
+  theme_bw() +
+  theme(legend.position = "none")+
+  theme(axis.text.x = element_text(size = 12, angle = 90, vjust = 0.5))+
+  theme(axis.title = element_text(size = 12, face = "bold"))+
+  labs(x = "C>U mutation context", y = "Percent of contexts mutated (%)")
+
+write.csv(tri.plot.data, file = "trinucleotide_context_plot.csv")
+ggsave(trinucleotides, file = "trinucleotide_context_preference.png", width = 16, height = 5, units = "in", dpi = 600)
+
+
+#Clean up environment
+rm(list = c("ci", "i", "lower_bound", "ratio", "successes", "trials", "upper_bound"))
+
+tetranucleotides
+
+
+
+
+
+
+###############
+#Cnnn contexts#
+###############
+
+cnnn.data <- data[grepl("^x\\w{3}$", data$analysis_context), ]
+cnnn.data$analysis_context <- toupper(cnnn.data$analysis_context)
+cnnn.data$analysis_context <- gsub("T", "U", cnnn.data$analysis_context)
+cnnn.data$analysis_context <- reorder(cnnn.data$analysis_context, -cnnn.data$relative_ratio)
+
+cnnn <- ggplot(cnnn.data, aes(x = analysis_context, y = relative_ratio)) +
+  geom_col(color = "black", fill = "azure3", width = 0.6) +
+  geom_errorbar(aes(x = analysis_context, ymin = CI_lower, ymax = CI_upper), width = 0.2, size = 1, color = "black") +
+  theme_bw() +
+  theme(legend.position = "none")+
+  theme(axis.text.x = element_text(size = 12, angle = 90, vjust = 0.5))+
+  theme(axis.title = element_text(size = 12, face = "bold"))+
+  labs(x = "C>U mutation context", y = "Percent of contexts mutated (%)")
+
+
+ggsave(cnnn, file = "cnnn_tetranucleotide_context_preference.png", width = 16, height = 5, units = "in", dpi = 600)
+
+
+###############
+#nCnn contexts#
+###############
+
+ncnn.data <- data[grepl("^\\w[xX]\\w{2}$", data$analysis_context), ]
+ncnn.data$analysis_context <- toupper(ncnn.data$analysis_context)
+ncnn.data$analysis_context <- gsub("T", "U", ncnn.data$analysis_context)
+ncnn.data$analysis_context <- reorder(ncnn.data$analysis_context, -ncnn.data$relative_ratio)
+
+ncnn <- ggplot(ncnn.data, aes(x = analysis_context, y = relative_ratio)) +
+  geom_col(color = "black", fill = "azure3", width = 0.6) +
+  geom_errorbar(aes(x = analysis_context, ymin = CI_lower, ymax = CI_upper), width = 0.2, size = 1, color = "black") +
+  theme_bw() +
+  theme(legend.position = "none")+
+  theme(axis.text.x = element_text(size = 12, angle = 90, vjust = 0.5))+
+  theme(axis.title = element_text(size = 12, face = "bold"))+
+  labs(x = "C>U mutation context", y = "Percent of contexts mutated (%)")
+
+ncnn
+
+ggsave(ncnn, file = "ncnn_tetranucleotide_context_preference.png", width = 16, height = 5, units = "in", dpi = 600)
+
+
+###############
+#nnCn contexts#
+###############
+
+nncn.data <- data[grepl("^\\w{2}[xX]\\w$", data$analysis_context), ]
+nncn.data$analysis_context <- toupper(nncn.data$analysis_context)
+nncn.data$analysis_context <- gsub("T", "U", nncn.data$analysis_context)
+nncn.data$analysis_context <- reorder(nncn.data$analysis_context, -nncn.data$relative_ratio)
+
+nncn <- ggplot(nncn.data, aes(x = analysis_context, y = relative_ratio)) +
+  geom_col(color = "black", fill = "azure3", width = 0.6) +
+  geom_errorbar(aes(x = analysis_context, ymin = CI_lower, ymax = CI_upper), width = 0.2, size = 1, color = "black") +
+  theme_bw() +
+  theme(legend.position = "none")+
+  theme(axis.text.x = element_text(size = 12, angle = 90, vjust = 0.5))+
+  theme(axis.title = element_text(size = 12, face = "bold"))+
+  labs(x = "C>U mutation context", y = "Percent of contexts mutated (%)")
+
+nncn
+
+ggsave(nncn, file = "nncn_tetranucleotide_context_preference.png", width = 16, height = 5, units = "in", dpi = 600)
+
+
+###############
+#nnnC contexts#
+###############
+
+nnnc.data <- data[grepl("^\\w{3}[xX]$", data$analysis_context), ]
+nnnc.data$analysis_context <- toupper(nnnc.data$analysis_context)
+nnnc.data$analysis_context <- gsub("T", "U", nnnc.data$analysis_context)
+nnnc.data$analysis_context <- reorder(nnnc.data$analysis_context, -nnnc.data$relative_ratio)
+
+nnnc <- ggplot(nnnc.data, aes(x = analysis_context, y = relative_ratio)) +
+  geom_col(color = "black", fill = "azure3", width = 0.6) +
+  geom_errorbar(aes(x = analysis_context, ymin = CI_lower, ymax = CI_upper), width = 0.2, size = 1, color = "black") +
+  theme_bw() +
+  theme(legend.position = "none")+
+  theme(axis.text.x = element_text(size = 12, angle = 90, vjust = 0.5))+
+  theme(axis.title = element_text(size = 12, face = "bold"))+
+  labs(x = "C>U mutation context", y = "Percent of contexts mutated (%)")
+
+nnnc
+
+ggsave(nncn, file = "nnnc_tetranucleotide_context_preference.png", width = 16, height = 5, units = "in", dpi = 600)
+
+```
+

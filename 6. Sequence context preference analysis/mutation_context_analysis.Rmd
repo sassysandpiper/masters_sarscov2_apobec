@@ -1,0 +1,612 @@
+---
+title: "Untitled"
+output: html_document
+date: "2023-05-03"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#load in libraries before starting
+library(rmarkdown)
+library(tidyverse)
+library(stringr)
+library(readxl)
+library(ggplot2)
+
+```
+
+
+MANDATORY DATA HANDLING
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#######################################################################################################
+DATA HANDLING TO LOAD SEQUENCES, MAKE CONSENSUS, ETC.
+#######################################################################################################
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+```{r}
+
+#############################################################################
+#STEP 1: READING SEQUENCES IN FROM FASTA FORMAT INTO DATA FRAME FOR ANALYSIS#
+#############################################################################
+
+
+# Read in the file
+# readLines() creates a variable where each element contains a string for each line of the file
+lines <- readLines("C:/Users/1044832/Desktop/aligned_clade/all_clades_no_gaps_aligned_with_dates.fasta")
+
+
+# To access each line you can just use indexing
+print(lines[1]) # prints the first line of the file - first sequence name
+print(lines[2]) # prints the second line of the file - start of first sequence
+
+# Initialize empty vectors for names and sequences
+# Vectors need to be initialized prior to using in a loop
+names_list <- c()
+sequences_list <- c()
+
+# Initialize new variables to hold the current names and sequence before adding them to the list
+current_name <- ""
+current_sequence <- ""
+
+#names_list and current_name are initialised differently because current_name only needs to hold one name at a time (hence only needs to be a string) while all current_names will be added to names_list (hence it needs to be a character vector to hold multiple strings)
+
+
+# Parse the lines
+for (line in lines) { # goes through all the lines one by one 
+  if (substr(line, 1, 1) == ">") { #substr separates out the part of the string that is specified, if first character of line is equal to > (a names line), then
+    
+    # New name, save previous sequence
+    if (current_name != "") {
+      names_list <- c(names_list, current_name)
+      sequences_list <- c(sequences_list, current_sequence)
+    }
+    # Start new sequence with this name
+    current_name <- gsub('>', '', line) # removing >
+    current_sequence <- ""
+  } else {
+    # Add to current sequence
+    current_sequence <- paste(current_sequence, line, sep="")
+  }
+}
+
+# Save the last name and sequence
+names_list <- c(names_list, current_name)
+sequences_list <- c(sequences_list, current_sequence)
+
+# Create a data frame with the name and sequence information
+df <- data.frame(name = names_list, sequence = sequences_list)
+
+# Cleaning up
+# Removing unwanted variables
+rm(list = c("current_name", "current_sequence", "line", "lines", "names_list", "sequences_list"))
+# Garbage Collection = removing temporary memory
+invisible(gc())
+
+
+```
+
+
+```{r}
+
+#######################################################
+#STEP 2: SEPARATING OUT EACH POSITION INTO ITS OWN ROW#
+#######################################################
+
+# get the maximum length of the strings in the sequence column
+max_length <- max(str_length(df$sequence))
+
+# extend the strings by adding dashes to the end
+df$sequence <- str_pad(df$sequence, max_length, "right", "-")
+
+# Separating each nucleotide
+df$split <- strsplit(df$sequence, split="")
+
+# Removing sequence column as its no longer needed
+df.min <- subset(df, select = c("name", "split"))
+
+# Making species names the column names
+df.wide <- pivot_wider(df.min, names_from = name, values_from = split)
+
+# Seperating the list into individual rows
+data <- df.wide %>% unnest_longer(c(colnames(df.wide)))
+
+# Adding position column
+data$position <- seq(1,nrow(data),1)
+
+# Cleaning environment
+rm(list=setdiff(ls(), c("data", "df")))
+invisible(gc())
+
+
+
+```
+
+
+```{r}
+
+################################################################
+#STEP 3: COUNTING FREQUENCY OF EACH NUCLEOTIDE IN EACH POSITION#
+################################################################
+
+nucleotides <- c("a", "t", "c", "g", "n", "-")
+
+
+for (i in nucleotides) {
+  x <- rowSums(data == tolower(i))         # Counts the number of occurrences of the nucleotide across the rows
+  data[ , ncol(data) + 1] <- x             # Append new column
+  colnames(data)[ncol(data)] <- paste(i)  # Rename column name
+  
+}
+
+#clean up environment
+rm(list = c("i", "nucleotides", "x"))
+invisible(gc())
+
+```
+
+
+```{r}
+
+#########################################################################
+#STEP 4: FINDING CONSENSUS SEQUENCE AT A DESIGNATED THRESHOLD (75% HERE)#
+#########################################################################
+
+#create data frame with position & nucleotide counts only
+nucleotide_counts <- subset(data, select = c("position", "a", "t", "c", "g"))
+
+consensus_count <- nucleotide_counts %>%
+               pivot_longer(!position, names_to = "nucleotide", values_to = "count")
+
+consensus_count <- consensus_count[order(consensus_count$position),] # ordering data by position (ascending order)
+
+#change the formula below to achieve the correct consensus cut off - nrow(df) is the number of sequences in data set
+#here the threshold is set at 75%
+consensus_threshold <- nrow(df)/4*3
+
+
+# creates new temporary data frame tmp1, and identifies positions where a nucleotide occurs in more than 75% of all sequences, but omits positions where there is no consensus base
+tmp1 <- subset(consensus_count, consensus_count$count >= (consensus_threshold)) 
+
+#creating data frame with just positions
+tmp2 <- data.frame(position = seq(1,nrow(data),1)) 
+
+# adds back positions where there is no consensus base as NA
+consensus <- merge(tmp1, tmp2, all = TRUE)
+
+# Replacing missing nucleotides with -
+consensus$nucleotide[is.na(consensus$nucleotide) == TRUE] <- "-"
+
+
+#joins consensus into a single string
+consensus_sequence_str <- ""
+
+for (i in 1:nrow(consensus)) {
+  x <- consensus$nucleotide[i]
+  consensus_sequence_str <- paste(consensus_sequence_str, x, sep="") # Adding each residue one by one
+}
+
+
+############################################################################
+#OPTION 2 FOR CONSENSUS: CONSENSUS WITH NO CUTOFF, TAKES MOST ABUNDANT BASE#
+############################################################################
+
+#tmp1 <- consensus_count %>% 
+#          group_by(position) %>% 
+#           slice(which.max(count)) 
+
+#tmp2 <- data.frame(position = seq(1,nrow(data),1)) 
+
+#consensus <- merge(tmp1, tmp2, all = TRUE) # adds back positions not conserved as NA
+
+#consensus$nucleotide[is.na(consensus$nucleotide) == TRUE] <- "-" # Replacing missing residues with -
+
+#no_lim_consensus_sequence <- ""
+
+#for (i in 1:nrow(consensus)) {
+#  x <- consensus$nucleotide[i]
+#  no_lim_consensus_sequence <- paste(no_lim_consensus_sequence, x, sep="") # Adding each residue one by one
+#}
+
+# Adding consensus sequence to data
+consensus_seq <- consensus$nucleotide
+data <-cbind(consensus_seq,data)
+
+# Cleaning up environment
+rm(list = c("tmp1", "tmp2", "i", "x", "consensus_seq", "consensus_threshold", "nucleotide_counts", "consensus_count", "consensus"))
+invisible(gc())
+
+```
+
+
+```{r}
+################################################################################
+#STEP 5: SEQUENCE CHANGE ANALYSIS#
+################################################################################
+
+#before comparing datasets, make a new data frame with all sequences to be analysed, and only the sequence that comparisons are being made to
+data_no_ref <- data[,3:ncol(data)]
+analysis_dataset <- cbind(data$consensus_seq, data_no_ref) 
+#**change "consensus_seq" to WT sequence name if comparing against WT sequence
+
+
+#renaming consensus sequence in analysis_dataset
+names(analysis_dataset)[names(analysis_dataset) == 'data$consensus_seq'] <- 'consensus_seq'
+
+
+# Comparing to designated sequence
+ref_sequence_name = colnames(analysis_dataset)[1] 
+#**change index number depending on where the sequence you want to compare to is - 1 for consensus, 2 for WT
+
+# Make new col to store mutations
+analysis_dataset$`n_a>t` = 0
+analysis_dataset$`n_a>c` = 0
+analysis_dataset$`n_a>g` = 0
+analysis_dataset$`n_t>a` = 0
+analysis_dataset$`n_t>c` = 0
+analysis_dataset$`n_t>g` = 0
+analysis_dataset$`n_c>a` = 0
+analysis_dataset$`n_c>t` = 0
+analysis_dataset$`n_c>g` = 0
+analysis_dataset$`n_g>a` = 0
+analysis_dataset$`n_g>t` = 0
+analysis_dataset$`n_g>c` = 0
+
+
+#before starting code below, check what case the consensus/reference genome is in, and change case of the atcg accordingly in code
+for (i in 1:nrow(analysis_dataset)) {
+  if (analysis_dataset$`consensus_seq`[i] == "a") {
+    analysis_dataset$`n_a>t`[i] = analysis_dataset$t[i]
+    analysis_dataset$`n_a>c`[i] = analysis_dataset$c[i]
+    analysis_dataset$`n_a>g`[i] = analysis_dataset$g[i]
+  }
+  if (analysis_dataset$`consensus_seq`[i] == "t") {
+    analysis_dataset$`n_t>a`[i] = analysis_dataset$a[i]
+    analysis_dataset$`n_t>c`[i] = analysis_dataset$c[i]
+    analysis_dataset$`n_t>g`[i] = analysis_dataset$g[i]
+  }
+  if (analysis_dataset$`consensus_seq`[i] == "c") {
+    analysis_dataset$`n_c>t`[i] = analysis_dataset$t[i]
+    analysis_dataset$`n_c>a`[i] = analysis_dataset$a[i]
+    analysis_dataset$`n_c>g`[i] = analysis_dataset$g[i]
+  }
+  if (analysis_dataset$`consensus_seq`[i] == "g") {
+    analysis_dataset$`n_g>t`[i] = analysis_dataset$t[i]
+    analysis_dataset$`n_g>a`[i] = analysis_dataset$a[i]
+    analysis_dataset$`n_g>c`[i] = analysis_dataset$c[i]
+  }
+}
+
+
+# Cleaning Environment
+rm(list = c("i", "data_no_ref", "ref_sequence_name", "df"))
+invisible(gc())
+```
+
+
+```{r}
+
+################################################################################
+#Step 6: FILTERING FOR FREQUENCY AND CREATING NEW FILTERED DATA FRAMES#
+################################################################################
+
+
+#filter rows based on frequency of mutation
+frequency_threshold <- c(50) 
+#Enter the raw number of mutations that represents the frequency threshold cutoff, i.e. 5% of 1000 = 50, so put in 50. Can analyse based on multiple frequency cutoffs by entering multiple cutoffs
+
+
+#for loop to loop through multiple frequency thresholds
+for (i in 1:length(frequency_threshold)) {#
+  #creating a filtered intermediate, where only columns starting with "n_" are filtered (mutation count columns only)
+  #all mutation count columns filtered at the same time
+  #If any position has a count in any column that is above the mutation frequency threshold, omit the position from analysis
+  filtered_intermediate <-  analysis_dataset %>%
+                              filter(if_all(starts_with("n_"), ~ . <= frequency_threshold[i]))
+  
+  #make a new data frame for the filtered results of each frequency threshold (high freq mutation sites omitted)
+  #each data set will be named "frequency_threshold" followed by the frequency threshold, for instance, frequency_threshold50
+  assign(paste("filtered_freq_", (frequency_threshold[i]), sep = ""), filtered_intermediate)
+}
+
+#cleaning up environment
+rm(list = c("i", "frequency_threshold", "filtered_intermediate"))
+invisible(gc())
+
+```
+
+
+```{r}
+##################################################################################
+#ALTERNATIVELY: COUNT MUTATIONS AGAINST CLADE (just import the wrangled datasets)#
+##################################################################################
+
+"C:/Users/1044832/Desktop/Analysis/3. Sequence change (against outlier)/clade_against_consensus/DATA/sequences + mutation counts filtered at 5%"
+
+# Set the directory path
+directory <- "C:/Users/1044832/Desktop/Analysis/3. Sequence change (against outlier)/clade_against_consensus/DATA/sequences + mutation counts filtered at 5%"
+
+# Get the list of CSV files in the directory
+csv_files <- list.files(directory, pattern = "\\.csv$", full.names = TRUE)
+
+# Loop through each CSV file and load it into the environment
+for (file in csv_files) {
+  # Extract the file name without the extension
+  file_name <- tools::file_path_sans_ext(basename(file))
+  
+  # Read the CSV file and assign it to the environment
+  assign(file_name, read.csv(file))
+}
+
+#Create a list of all dataframes
+dflist <- ls(pattern = "_df$")
+rm(list = setdiff(ls(), dflist))
+
+invisible(gc())
+```
+
+
+
+Analysis
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#######################################################################################################
+CONTEXT ANALYSIS - LOOKING AT IMMEDIATE UPSTREAM & DOWNSTREAM BASES OF DESIGNATED MUTATIONS
+#######################################################################################################
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Analysis workflow:
+
+#Step 1#
+The position where a C>U mutation has occurred when compared to the consensus or the designated sequence, along with the four bases upstream and downstream of the mutation, are pulled out and stored in a data frame named "seq_mutation_context" with a "position" and "context" column. The four bases up and downstream are stored in a single string (for instance, if the context is aacg C gtaa, the string would be aacggtaa). An "x" is then inserted where the mutated C would be in the context. Now the context string looks like this : aacgxgtaa
+
+#Step 2#
+filter out all mutations that happen at a high enough frequency (the threshold is modifiable)
+
+#Step 3#
+A list of all possible di (nC or Cn), tri (nnC, nCn, Cnn), and tetranucleotide (nnnC, nnCn, nCnn, Cnnn) contexts is generated, and stored in the variable "all_strings"
+
+#Step 4#
+The number of all possible contexts containing Cs are counted in the consensus. The raw count is then multiplied by the number of sequences that are analysed in the data set to produce an estimate for the total number of mutatable C contexts in all sequences. The consensus count and presumed total count of mutatable C contexts are stored in the data frame "consensus_base_context"
+
+#Step 5#
+An iterative list of all possible positions the mutatable C can be in is created. To do this, duplicates are generated for any context containing more than 1 C (for instance, accc will have 3 duplicates created, one for each position the mutatble C can be in). In this iterative list, a single c in each possible mutatable location is replaced with an x (for instance, for accc, the three duplicates would say axcc, acxc, accx). These new representations of all possible mutatable contexts of C are then added to a new data frame called "analysis_consensus_pattern_count", with the columns "pattern", "n", "presumed_n_all", and "analysis_context"
+
+#Step 6#
+the mutated contexts are then string matched to the list of all mutatble contexts. The total number of mutations that happened in each possible context is then calculated. Lastly, a relative ratio is calculated to nomalise for the occurrence frequency of each possible context in the genome (for instance, if the context "cg" is very abundant in the genome, more of them will be mutated and the preference for "cg" context will be massively overrepresented). The ratio is calculated as (number of contexts mutated)/(total number of contexts in all sequences). The raw count and the ratio are stored in a new data frame "compared_counts", in the columns "matches" and "relative_ratio"
+
+```{r}
+
+####################################################################################
+#STEP 1 - LISTING OUT ALL CONTEXT +/- 4 AND POSITION OF EACH C>U MUTATION#
+#this will take a hot second#
+####################################################################################
+
+#Create a list of all dataframes
+dflist <- ls(pattern = "_df$")
+
+
+# Initialize an empty data frame
+seq_mutation_context <- data.frame(position = numeric(), context = character())
+
+for (df in dflist) {
+  data <- get(df)
+  
+  for (j in 3:(ncol(data)-19)) {  # Loop through each column in the data frame
+    base_context <- data.frame()  # Create an empty data frame for each column
+    
+    for (i in 1:nrow(data)) {  # Loop through each row in the current column
+      if (data[i, 1] == "c" && data[i, j] == "t") {  # Check conditions for extraction
+        current_context <- c(data[(i-4):(i-1), j], data[(i+1):(i+4), j])  # Extract values
+        result_string <- paste(current_context, collapse = "")  # Concatenate values into a string
+        tmp2 <- data.frame(position = data$position[i], context = result_string)  # Create a new data frame with position and context
+        base_context <- rbind(base_context, tmp2)  # Add the new data frame to base_context
+      }
+    }
+    
+    seq_mutation_context <- rbind(seq_mutation_context, base_context)  # Add the current round of results to seq_mutation_context
+    
+    message(paste("Progress:", j-2, "/", (ncol(data)-19)-2))  # Display progress message
+  }
+}
+
+
+
+#For downstream analysis - insert an "x" for where the mutation is into the string of each context
+seq_mutation_context$analysis_context <- paste0(substring(seq_mutation_context$context, 1, 4), "x", substring(seq_mutation_context$context, 5))
+
+
+write.csv(seq_mutation_context, file = "n11000_cumut_context_f0.05.csv")
+
+#Cleaning up environment
+rm(list = c("current_context", "i", "j", "tmp2", "base_context", "result_string"))
+invisible(gc())
+
+```
+
+
+```{r}
+###########################################################
+#STEP 2 - FILTERING OUT HIGH FREQUENCY MUTATIONS#
+###########################################################
+
+#assign new data frame to hold results
+freq_table <- seq_mutation_context %>% group_by(position) %>% count(position)
+
+#assigning threshold of max freq (put down the raw number of mutations rather than a percentage, say 5% in 1000, put down 50)
+threshold <- 50
+
+#merge frequency table with counts, resulting table should have duplicate frequency values - i.e. if a mutation position appears 3 times, all entries that have the same position will have a count of 3 attached
+seq_mutation_context <- merge(seq_mutation_context, freq_table)
+
+#filter out high freq mutations
+seq_mutation_context <- seq_mutation_context %>% filter(n <= threshold)
+
+#Cleaning up environment
+rm(list = c("freq_table", "threshold"))
+invisible(gc())
+
+```
+
+
+```{r}
+
+##########################################################################################################
+#STEP 3 - CREATING LIST OF ALL POSSIBLE DI, TRI, AND TETRANUCLEOTIDE CONTEXTS FOR C>U MUTATIONS#
+##########################################################################################################
+
+# create a vector of the four letters
+letters <- c("a", "c", "t", "g")
+
+# create a vector of all possible combinations of 4 letters
+four_long_strings <- apply(expand.grid(letters, letters, letters, letters), 1, paste, collapse = "")
+
+# create a vector of all possible combinations of 3 letters
+three_long_strings <- apply(expand.grid(letters, letters, letters), 1, paste, collapse = "")
+
+# create a vector of all possible combinations of 2 letters
+two_long_strings <- apply(expand.grid(letters, letters), 1, paste, collapse = "")
+
+# combine the three vectors into a single vector containing "c" only
+all_strings <- c(four_long_strings, three_long_strings, two_long_strings)
+all_strings <- all_strings[grep("c", all_strings)]
+
+#Cleaning up environment
+rm(list = c("four_long_strings", "letters", "three_long_strings", "two_long_strings"))
+invisible(gc())
+```
+
+
+```{r}
+#########################################################################
+#STEP 4 - COUNTING ALL POSSIBLE CONTEXTS IN CONSENSUS SEQUENCE#
+#########################################################################
+
+# Designating the context to be counted
+pattern <- all_strings
+consensus_pattern_count_all_clades <- data.frame(pattern = pattern)
+
+dflist <- ls(pattern = "_df$")
+
+
+for (df in dflist) {
+  currentdf <- get(df)
+  clade_name <- gsub("filtered_freq_", "", df)  # Extract clade name from df
+  clade_name <- gsub("_df", "", clade_name)  # Remove "_df" from clade name
+  consensus_sequence_str <- paste(currentdf$consensus_seq, collapse = "")
+  consensus_pattern_count <- data.frame()
+  
+  # Counting number of each context in the consensus
+  for (i in pattern){
+    current_pattern_count <- str_count(consensus_sequence_str, i)
+    tmp <- data.frame(pattern = i, n_consensus = current_pattern_count)
+    consensus_pattern_count <- rbind(consensus_pattern_count, tmp)
+  }
+  
+  # Calculating assumed total number of possible contexts
+  consensus_pattern_count$presumed_n_all <- consensus_pattern_count$n_consensus * 1000
+  
+  # Bind columns into a new data frame with clade name as column name
+  consensus_pattern_count_all_clades[, clade_name] <- consensus_pattern_count$presumed_n_all
+}
+
+
+#Calculate the sum of all contexts available in all sequences (n11000)
+consensus_pattern_count_all_clades[, 2:12] <- lapply(consensus_pattern_count_all_clades[, 2:12], as.numeric)
+consensus_pattern_count_all_clades$presumed_n_all <- rowSums(consensus_pattern_count_all_clades[, 2:12])
+
+consensus_pattern_count <- consensus_pattern_count_all_clades
+
+
+
+
+#Cleaning up environment
+rm(list = c("pattern", "i", "col_name", "all_strings", "current_pattern_count", "tmp", "clade_name", "df", "dflist", "currentdf", "data", "consensus_pattern_count_all_clades"))
+invisible(gc())
+
+```
+
+
+```{r}
+####################################################################################################
+#STEP 5 - CREATING AN ITERATIVE LIST OF ALL POSSIBLE CONTEXTS WITH AN X IN PLACE OF THE C#
+####################################################################################################
+#**for contexts with more than 1 c, i.e. cgcc, the rows are duplicated so each possible placement of c can be accounted for
+#**the resulting rows should have entries "xgcc", "cgxc", "cgcx"
+
+#find positions of "c" in each entry in the pattern column
+c_pos <- lapply(consensus_pattern_count$pattern, function(x) str_locate_all(x, "c")[[1]][,1]) 
+
+#replace c with x one at a time
+consensus_pattern_count_test <- consensus_pattern_count %>%
+  mutate(analysis_context = pattern)
+
+for (i in seq_along(c_pos)) {
+  for (pos in c_pos[[i]]) {
+    consensus_pattern_count_test <- consensus_pattern_count_test %>%
+      add_row(n_consensus = consensus_pattern_count$n_consensus[i], 
+              pattern = consensus_pattern_count$pattern[i], 
+              presumed_n_all = consensus_pattern_count$presumed_n_all[i], 
+              analysis_context = str_sub(consensus_pattern_count$pattern[i], start = 1, end = pos-1) %>%
+                paste0("x") %>%
+                paste0(str_sub(consensus_pattern_count$pattern[i], start = pos+1, end = nchar(consensus_pattern_count$pattern[i]))))
+  }
+}
+
+#filter out the newly added rows into a new data frame
+analysis_consensus_pattern_count <- consensus_pattern_count_test %>% filter(grepl("x", analysis_context))
+analysis_consensus_pattern_count <- analysis_consensus_pattern_count[, -c(2:12)]
+
+
+
+###
+#Optional - count contexts in all sequences individually
+###
+
+#Counting for all sequences, with counts connected to sequence name
+#for (j in 3:(ncol(data)-7)) {
+#  current_seq <- paste(data[,j], collapse = "")
+#  for (i in pattern) {
+#    current_seq_name <- col_name[j]
+#    current_pattern_count <- str_count(current_seq, i)
+#    tmp <- data.frame(pattern = i, sequence = current_seq_name, n = current_pattern_count)
+#    all_pattern_count <- rbind(all_pattern_count, tmp)
+#  }
+#}
+
+#summing all same contexts across sequences
+#all_pattern_count_sum <- aggregate(all_pattern_count$n, by=list(all_pattern_count$pattern), sum)
+
+
+
+#Cleaning up environment
+rm(list = c("tmp", "i", "j", "freq_table", "threshold", "result_string", "pos", "all_strings", "df_new", "df", "consensus_pattern_count_test", "c_pos"))
+invisible(gc())
+
+```
+
+
+```{r}
+####################################################################################################
+#STEP 6 - STRING MATCHING MUTATION CONTEXTS TO ALL POSSIBLE CONTEXTS#
+####################################################################################################
+
+#string matching mutated contexts to all possible contexts and calculate a sum number - total number of mutations that happened in each context
+compared_counts <- analysis_consensus_pattern_count %>% 
+  mutate(matches = sapply(analysis_context, function(x) sum(str_detect(seq_mutation_context$analysis_context, x))))
+
+#work out ratio to account for abundance of each context in virus genomes
+compared_counts$relative_ratio <- compared_counts$matches/compared_counts$presumed_n_all
+
+```
+
+
+```{r}
+####################################################################################################
+#STEP 7 (Optional) - EXPORT DATA#
+####################################################################################################
+write.csv(seq_mutation_context, "all_mutation_context_v.csv", row.names = FALSE)
+write.csv(compared_counts, "mutation_context_analysis_n11000.csv")
+
+```
+
