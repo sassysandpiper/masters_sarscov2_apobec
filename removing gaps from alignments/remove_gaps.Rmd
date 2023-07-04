@@ -1,0 +1,171 @@
+title: "getting rid of gaps"
+output: html_document
+date: "2023-04-21"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+library(tidyverse)
+
+```
+
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##################################################################################################################
+REMOVING GAPS - REMOVES ALL GAPS FROM ALL SEQUENCES THAT WERE INSERTED INTO WT DURING ALIGNMENT
+##################################################################################################################
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Rationale (not the most well-written thing but it kind of makes sense):
+
+The sequence change algorithm only counts the base differences from a designated sequence (i.e. WT) or a consensus (generated based on a 75% threshold - using a high-frequency threshold due to the highly conserved nature of SARS-CoV-2 genomes). If there are any insertions in a few sequences, there will be no base to compare to in the WT sequence, and the consensus will not designate a base for a location where no amino acid frequency exceeds the threshold (the position will show up as a -). Therefore, when running the sequence change analysis, there will be no calculation done for that position. In the few occasions where an insertion is present in more than 75% of the sequences, but is not present in WT, the calculation can be run if compared against consensus. I am consciously choosing to omit those calculations to maintain consistency between the comparisons against WT and comparisons against the consensus - if both are done in the same manner on the same sequences (positions of insertions deleted), the results will be comparable. Yes I might miss out on some mutations, but in the grand scheme of things, I don't think they're that important (because insertions shouldn't favour APOBEC activity - maybe confirm this by reading papers)
+
+
+
+Analysis workflow:
+
+#Step 1#
+Reading in all sequences into a data frame for analysis. The sequences are loaded in as fasta files (which are interchangable with .txt files). In these files, the sequence name line will always start with ">", while all the sequence lines will start with a letter (a, c, g, t). We take advantage of this distinction to identify and extract the sequence name. Then, the sequence lines following the line starting with ">" are extracted and pasted together into one string with no spaces in between. This continues to repeat until reaching the next line beginning with ">", indicating the start of a new sequence. The current sequence name and sequence body are then saved into two separate lists ("names_list" and "sequence_list") before the same process is repeated for the next sequence. At the end, this will result in two lists "names_list" with all the sequence names, and "sequence_list" with all the sequences. These two lists are then pasted into a data frame "df", where the two columns are the two lists.
+
+#Step 2#
+Each base in the sequence column in df is separated out. Then, the whole data frame is pivoted so that each sequence is a column, and each row is a position in the seqeunce. This results in a data frame "data" that has as many columns as there are sequences, and as many rows as the length of the sequence. A position column is added to the data frame.
+
+#Step 3#
+Rows (positions) where the WT sequence has a gap (the entry in that row is "-" for WT) are filtered out.
+
+#Step 4#
+The data frame "data" is reoutputted into fasta format for downstream analysis.
+
+
+```{r}
+################################################################################
+#STEP 1: READING SEQUENCES IN FROM FASTA FORMAT INTO DATA FRAME FOR ANALYSIS#
+################################################################################
+
+
+# Read in the file
+# readLines() creates a variable where each element contains a string for each line of the file
+lines <- readLines("MAFFT output/V_sel1_n1000_sequences_2023_04_23.f_aligned.fa")
+
+
+# To access each line you can just use indexing
+print(lines[1]) # prints the first line of the file - first sequence name
+print(lines[2]) # prints the second line of the file - start of first sequence
+
+# Initialize empty vectors for names and sequences
+# Vectors need to be initialized prior to using in a loop
+names_list <- c()
+sequences_list <- c()
+
+# Initialize new variables to hold the current names and sequence before adding them to the list
+current_name <- ""
+current_sequence <- ""
+
+#names_list and current_name are initialised differently because current_name only needs to hold one name at a time (hence only needs to be a string) while all current_names will be added to names_list (hence it needs to be a character vector to hold multiple strings)
+
+
+# Parse the lines
+for (line in lines) { # goes through all the lines one by one 
+  if (substr(line, 1, 1) == ">") { #substr separates out the part of the string that is specified, if first character of line is equal to > (a names line), then
+    
+    # New name, save previous sequence
+    if (current_name != "") {
+      names_list <- c(names_list, current_name)
+      sequences_list <- c(sequences_list, current_sequence)
+    }
+    # Start new sequence with this name
+    current_name <- line # removing >
+    current_sequence <- ""
+  } else {
+    # Add to current sequence
+    current_sequence <- paste(current_sequence, line, sep="")
+  }
+}
+
+# Save the last name and sequence
+names_list <- c(names_list, current_name)
+sequences_list <- c(sequences_list, current_sequence)
+
+# Create a data frame with the name and sequence information
+df <- data.frame(name = names_list, sequence = sequences_list)
+
+# Cleaning up
+# Removing unwanted variables
+rm(list = c("current_name", "current_sequence", "line", "lines", "names_list", "sequences_list"))
+# Garbage Collection = removing temporary memory
+gc()
+```
+
+
+```{r}
+################################################################################
+#STEP 2: SEPARATING OUT EACH POSITION INTO ITS OWN ROW#
+################################################################################
+
+# Separating each nucleotide
+df$split <- strsplit(df$sequence, split="")
+
+# Removing sequence column as its no longer needed
+df.min <- subset(df, select = c("name", "split"))
+
+# Making species names the column names
+df.wide <- pivot_wider(df.min, names_from = name, values_from = split)
+
+# Separating the list into individual rows
+data <- df.wide %>% unnest_longer(c(colnames(df.wide)))
+
+# Adding position column
+data$position <- seq(1,nrow(data),1)
+
+# Cleaning environment
+rm(list=setdiff(ls(), c("data", "df")))
+invisible(gc())
+
+```
+
+
+```{r}
+################################################################################
+#STEP 3: REMOVE GAPS#
+################################################################################
+
+data_nogaps <- data %>% filter(data$`>hCoV-19/Wuhan/WIV04/2019|EPI_ISL_402124` != "-")
+
+
+```
+
+
+```{r}
+################################################################################
+#STEP 3: OUTPUT BACK INTO FASTA FILE#
+################################################################################
+
+
+#new data frame, minus the last column (position column). All columns are just sequences
+nogap_df <- data_nogaps[,1:(ncol(data_nogaps)-1)]
+
+sequence_names <- colnames(nogap_df)
+
+sequence_body <- apply(nogap_df, 2, paste, collapse = "")
+
+
+
+
+
+
+sink("remove_gaps processed sequences/V_sel1_n1000_sequences_2023_04_23.f_aligned_nogaps.fasta")
+for (i in 1:length(sequence_names)) {
+  cat(paste(sequence_names[i], "\n", sep = ""))
+  cat(paste(sequence_body[i], "\n", sep = ""))
+}
+sink()
+
+
+
+```
+
+
+
+
