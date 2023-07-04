@@ -1,0 +1,294 @@
+---
+title: "secondary structure analysis"
+output: html_document
+date: "2023-05-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(readxl)
+
+```
+
+```{r}
+
+#Please specify the directory you wish to use
+dir <- "C:/Users/1265205/Desktop/Sarbecoviruses/fasta_format"
+
+#list all the .txt files in the specified directory(ies)
+files <- list.files(path = dir, pattern =".fasta")
+
+################################################################################
+#STEP 0: Looping through every sequence file in the directory#
+################################################################################
+
+for (file in files){
+  
+  ################################################################################
+  #STEP 1: READING SEQUENCES IN FROM FASTA FORMAT INTO DATA FRAME FOR ANALYSIS#
+  ################################################################################
+
+  # Read in the file
+  # readLines() creates a variable where each element contains a string for each line of the file
+  lines <- readLines(paste(dir, "/", file, sep = ""))
+  
+  # Initialize empty vectors for names and sequences
+  # Vectors need to be initialized prior to using in a loop
+  names_list <- c()
+  sequences_list <- c()
+  
+  # Initialize new variables to hold the current names and sequence before adding them to the list
+  current_name <- ""
+  current_sequence <- ""
+  
+  #names_list and current_name are initialised differently because current_name only needs to hold one name at a time (hence only needs to be a string) while all current_names will be added to names_list (hence it needs to be a character vector to hold multiple strings)
+
+  
+  # Parse the lines
+  for (line in lines) { # goes through all the lines one by one 
+    if (substr(line, 1, 1) == ">") { #substr separates out the part of the string that is specified, if first character of line is equal to > (a names line), then
+      
+      # New name, save previous sequence
+      if (current_name != "") {
+        names_list <- c(names_list, current_name)
+        current_sequence <- toupper(current_sequence)
+        sequences_list <- c(sequences_list, current_sequence)
+      }
+      # Start new sequence with this name
+      current_name <- gsub('>', '', line) # removing >
+      current_sequence <- ""
+    } else {
+      # Add to current sequence
+      current_sequence <- paste(current_sequence, line, sep="")
+    }
+  }
+  
+  # Save the last name and sequence
+  names_list <- c(names_list, current_name)
+  current_sequence <- toupper(current_sequence)
+  sequences_list <- c(sequences_list, current_sequence)
+  
+  # Create a data frame with the name and sequence information
+  df <- data.frame(name = names_list, sequence = sequences_list)
+  
+  # Cleaning up
+  # Removing unwanted variables
+  rm(list = c("current_name", "current_sequence", "line", "lines", "names_list", "sequences_list"))
+  # Garbage Collection = removing temporary memory
+  gc()
+  
+  ################################################################################
+  #STEP 2: SEPARATING OUT EACH POSITION INTO ITS OWN ROW#
+  ################################################################################
+  
+  # Making all the sequences the same length for unnest_longer()
+  # If sequences are shorter than the max length, add enough - at the end to make them equivalent
+  
+  # get the maximum length of the strings in the sequence column
+  max_length <- max(str_length(df$sequence))
+
+  # extend the strings by adding dashes to the end
+  df$sequence <- str_pad(df$sequence, max_length, "right", "-")
+
+  # Separating each nucleotide
+  df$split <- strsplit(df$sequence, split="")
+  
+  # Removing sequence column as its no longer needed
+  df.min <- subset(df, select = c("name", "split"))
+  
+  # Making species names the column names
+  df.wide <- pivot_wider(df.min, names_from = name, values_from = split)
+  
+  # Separating the list into individual rows and saving the new data frame under a new name
+  new_df_name <- strsplit(file, "-")[[1]][1]  # Use 'file' instead of 'files'
+  assign(new_df_name, df.wide %>% unnest_longer(c(colnames(df.wide))))
+}
+
+rm(list = c("df", "df.min", "df.wide", "dir", "file", "files", "max_length", "new_df_name"))
+invisible(gc())
+
+
+#Creating a list of all data frame names 
+dflist <- ls(pattern = "_df")
+
+#Changing all data frames to lower case
+for(df in dflist){
+  currentdf <- get(df)
+  currentdf <- apply(currentdf, 2, function(x) tolower(x))
+  currentdf <- as.data.frame(currentdf)
+  assign(df, currentdf)
+}
+
+
+rm(list = c("df"))
+invisible(gc())
+
+```
+```{r}
+################################################################
+#RANDOM GROUP GENERATION TO HAVE MULTIPLE DATA SETS#
+################################################################
+
+#First data set
+set.seed(12)
+# Generate 62 random numbers between 1 and 187
+random_numbers <- sample(1:187, size = 62, replace = FALSE)
+
+#Create new dataset for set 1
+set1 <- data.frame(NA)
+
+#Extract the columns into dataset "set1"
+for (i in random_numbers){
+  column <- sarbecovirus_orf1ab.fasta[, i, drop = FALSE]
+  set1 <- cbind(set1, column)
+}
+
+#Delete first NA column
+set1 <- set1[, -1]
+
+#Delete the columns that are already in set 1 from the original data set
+sarbecovirus_orf1ab.fasta <- sarbecovirus_orf1ab.fasta[, !colnames(sarbecovirus_orf1ab.fasta) %in% colnames(set1)]
+
+
+
+
+
+#Second data set
+set.seed(12)
+# Generate 62 random numbers between 1 and 187
+random_numbers <- sample(1:125, size = 62, replace = FALSE)
+
+#Create new dataset for set 1
+set2 <- data.frame(NA)
+
+#Extract the columns into dataset "set1"
+for (i in random_numbers){
+  column <- sarbecovirus_orf1ab.fasta[, i, drop = FALSE]
+  set2 <- cbind(set2, column)
+}
+
+#Delete first NA column
+set2 <- set2[, -1]
+
+#Delete the columns that are already in set 1 from the original data set
+sarbecovirus_orf1ab.fasta <- sarbecovirus_orf1ab.fasta[, !colnames(sarbecovirus_orf1ab.fasta) %in% colnames(set2)]
+
+#Change the name of the original data frame to set 3
+set3 <- sarbecovirus_orf1ab.fasta
+
+
+
+dflist <- ls(pattern = "set")
+
+#Changing all data frames to lower case
+for(df in dflist){
+  currentdf <- get(df)
+  currentdf <- apply(currentdf, 2, function(x) tolower(x))
+  currentdf <- as.data.frame(currentdf)
+  assign(df, currentdf)
+}
+
+
+#Clean up environment
+rm(list = c("column", "sarbecovirus_orf1ab.fasta", "common_cols", "dflist", "i", "random_numbers", "currentdf", "df", "dflist"))
+invisible(gc())
+
+
+
+
+```
+
+
+
+```{r}
+
+################################################################
+#STEP 3: COUNTING FREQUENCY OF EACH NUCLEOTIDE IN EACH POSITION#
+################################################################
+
+dflist <- ls(pattern = "set")
+
+nucleotides <- c("a", "t", "c", "g", "n", "-")
+
+for (df in dflist) {
+  currentdf <- get(df)
+  for (i in nucleotides) {
+    x <- rowSums(currentdf == tolower(i))                   # Counts the number of occurrences of the nucleotide across the rows
+    currentdf[, ncol(currentdf) + 1] <- x                    # Append new column
+    colnames(currentdf)[ncol(currentdf)] <- paste(i)        # Rename column name
+    currentdf$position <- seq(1, nrow(currentdf))
+  }
+  assign(df, currentdf)                                    # Assign the modified data frame back to the original name
+}
+
+
+
+
+#clean up environment
+rm(list = c("i", "nucleotides", "x", "df", "currentdf"))
+invisible(gc())
+
+```
+
+
+```{r}
+
+#########################################################################
+#STEP 4: FINDING CONSENSUS SEQUENCE AT A DESIGNATED THRESHOLD (75% HERE)#
+#########################################################################
+
+for (df in dflist) {
+  
+  currentdf <- get(df)
+
+  # Create data frame with position & nucleotide counts only
+  nucleotide_counts <- subset(currentdf, select = c("position", "a", "t", "c", "g"))
+  consensus_count <- nucleotide_counts %>%
+    pivot_longer(!position, names_to = "nucleotide", values_to = "count")
+  consensus_count <- consensus_count[order(consensus_count$position),] # Ordering data by position (ascending order)
+  
+  # Change the formula below to achieve the correct consensus cutoff
+  # nrow(currentdf) is the number of sequences in the data set
+  # Here, the threshold is set at 75%
+  consensus_threshold <- 62 / 4 * 3
+  
+  # Create a new temporary data frame (tmp1) that identifies positions where a nucleotide occurs in more than 75% of all sequences,
+  # but omits positions where there is no consensus base
+  tmp1 <- subset(consensus_count, count >= consensus_threshold)
+  
+  # Create a data frame with just positions
+  tmp2 <- data.frame(position = seq(1, nrow(currentdf), 1))
+  
+  # Add back positions where there is no consensus base as NA
+  consensus <- merge(tmp1, tmp2, all = TRUE)
+  
+  # Replace missing nucleotides with "-"
+  consensus$nucleotide[is.na(consensus$nucleotide)] <- "-"
+  
+  # Join consensus into a single string
+  consensus_sequence_str <- paste(consensus$nucleotide, collapse = "")
+  
+  # Add consensus sequence as a new column in the current data frame
+  currentdf <- bind_cols(consensus_seq = consensus$nucleotide, currentdf)
+  
+  assign(df, currentdf) 
+  
+}
+
+
+# Cleaning up environment
+rm(list = c("tmp1", "tmp2", "i", "x", "consensus_seq", "consensus_threshold", "nucleotide_counts", "consensus_count", "consensus", "df", "currentdf", "consensus_sequence_str"))
+invisible(gc())
+
+
+#Save the data frames for processing later
+write.csv(set1, file = "set1_sarbeco.csv")
+write.csv(set2, file = "set2_sarbeco.csv")
+write.csv(set3, file = "set3_sarbeco.csv")
+
+
+
+```
+
