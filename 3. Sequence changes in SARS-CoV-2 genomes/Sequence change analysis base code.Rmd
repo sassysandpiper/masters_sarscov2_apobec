@@ -1,0 +1,466 @@
+---
+title: "secondary structure analysis"
+output: html_document
+date: "2023-05-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(readxl)
+
+```
+
+
+
+Analysis
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##################################################################################################################
+SEQUENCE CHANGE ANALYSIS - COUNTING NUMBER OF MUTATIONS AGAINST DESIGNATED SEQUENCE BASED ON A FREQUENCY THRESHOLD
+##################################################################################################################
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Analysis workflow:
+
+####
+First couple of chunks include code that is copied across multiple files. These chunks contain code for "mandatory data handling" (i.e. importing fasta files, turning all .fasta files into data frame format, etc.). These chunks will not be annotated across all other code file, and are labeled as mandatory data handling chunks in this file.
+####
+
+#Step 1 (mandatory data handling)#
+All lines in .fasta sequence files are read in using the "readlines" command, and stored in the variable "lines". Then, a for/if loop is initiated to parse out the lines containing sequence names (these lines always start with ">") and lines containing the sequence body (all other lines). Briefly, the logic of this for loop is as follows. If the current line starts with a ">", and the current name variable is empty (will be the case for the first line starting with ">" the code encounters), paste everything following the ">" in that line into the variable "current_name". Then, continue to paste every line after that into the variable "current_sequence" without any gaps until the code runs into the next line starting with ">" (indicates the beginning of a new sequence). Once the code encounters the next line starting with ">", paste "current_name" into the character list "names_list", and paste "current_sequence" into the character list "sequence_list". Continue to do this for every line in the .fasta file. The end product of this loop is two data frames "names_list" and "sequence_list", containing the list of sequence names and sequences, respectively. Lastly, the two data frames are compiled into one data frame named "df" with 2 columns, a names column and a sequence column.
+
+#Step 2 (mandatory data handling)#
+First, the maximum length of the longest sequence in all sequences in data frame "df" is extracted. All other sequences are then padded at the 5' end by inserting "-" to lengthen all sequences to the same length as the longest sequence. This makes the downstream analysis a lot easier. Next, each nucleotide in each sequence string in the "sequence" column is separated. Then, the sequence names in the "names" column is used to create the column names in a new data frame "data", while the sequence split strings in the "sequence" column is used to create the rows of each column. The resulting data frame "data" should have one column for each sequence in the data set, along with a column labeling the position of each row.
+
+#Step 3 (mandatory data handling)#
+The number of nucleotides, no base calls (n), and gaps (-) in each position are counted, and stored in respective columns (i.e. "a", "g", "-", "n", etc.)
+
+#Step 4 (mandatory data handling)#
+Finding a consensus sequence based on a frequency threshold. Briefly, the consensus sequence will only include the nucleotide that occurs above a certain frequency threshold for each position. For instance, if 78% of sequences have the nucleotide "A" at position 3, and the consensus threshold is 75%, the consensus will identify the consensus base for that position as "A". Contrarily, if no base frequency exceeds 75% at position 3, the consensus sequence will not identify a consensus base for the position, and would instead include a "-". The consensus threshold is modifiable. There is also an option to create a consensus based on the nucleotide that occurs most frequently at each position. This method will produce a consensus sequence that has no gaps, at the expense of accuracy and representativeness of consensus sequence. The resulting consensus sequence is added to the data frame "data" in the column "consensus". 
+
+#Step 5#
+Mutation analysis on the sequence data frame "data". The number of each type of mutation is counted against a designated sequence. The designated sequence is modifiable, but is most likely going to be the WT or consensus sequence. The resulting mutation counts are stored in new columns named "n_a>t" and so on, and added into the data frame "analysis_dataset"
+
+#Step 6#
+Filtering out mutations that occur more than a frequency threshold. While this does not account for highly variable sites (where C>U mutations are usually not going to be due to any specific drivers such as APOBEC), it does account for phylogenetically linked mutations (the mutations came across before the phylogenetic split, and occur at high frequencies due to shared phylogeny rather than convergent APOBEC editing). Further phylogenetic proof of the validity of this method can be found in other code files.
+
+#Analysis 1#
+Total base count calculator.Calculates the total number of each base in all sequences. IS NOT FILTERED BY FREQUENCY (every base in each sequence is present). The results are stored in data frame total_base_counts. Stores raw counts in a data frame named "total_base_counts"
+
+#Analysis 2#
+Sequence change calculator. Calculates number of sequence changes constrained by a frequency threshold. Each filtered dataset is outputted into a data frame named "filtered_freq_[insert frequency threshold]" (not needed but convinient to have). This chunk is able to do the following and output the results into the data frame "sequence_change_analysis":
+  a) Calculate number of sequence changes for multiple frequency thresholds (in columns named like "n_a>c")
+  b) Calculate the ratio of C>U/U>C (in columns named like "rc>t")
+  c) Calculate the normalised ratio of C>U/U>C (in relation to the number of Cs and Us, (nC>U/nU>C) * (nU/nC))(in columns named like "nrc>t")
+  
+
+```{r}
+
+#############################################################################
+#STEP 1: READING SEQUENCES IN FROM FASTA FORMAT INTO DATA FRAME FOR ANALYSIS#
+#############################################################################
+
+
+# Read in the file
+# readLines() creates a variable where each element contains a string for each line of the file
+lines <- readLines("C:/Users/1044832/Desktop/Analysis/Frequency filtering phylogenetic proof/allclades_n200.fasta")
+
+
+# To access each line you can just use indexing
+print(lines[1]) # prints the first line of the file - first sequence name
+print(lines[2]) # prints the second line of the file - start of first sequence
+
+# Initialize empty vectors for names and sequences
+names_list <- c()
+sequences_list <- c()
+
+# Initialize new variables to hold the current names and sequence before adding them to the list
+current_name <- ""
+current_sequence <- ""
+
+#names_list and current_name are initialised differently because current_name only needs to hold one name at a time (hence only needs to be a string) while all current_names will be added to names_list (hence it needs to be a character vector to hold multiple strings)
+
+
+# Parse the lines
+for (line in lines) { # goes through all the lines one by one 
+  if (substr(line, 1, 1) == ">") { #substr separates out the part of the string that is specified, if first character of line is equal to > (a names line), then
+    
+    # New name, save previous sequence
+    if (current_name != "") {
+      names_list <- c(names_list, current_name)
+      sequences_list <- c(sequences_list, current_sequence)
+    }
+    # Start new sequence with this name
+    current_name <- gsub('>', '', line) # removing >
+    current_sequence <- ""
+  } else {
+    # Add to current sequence
+    current_sequence <- paste(current_sequence, line, sep="")
+  }
+}
+
+# Save the last name and sequence
+names_list <- c(names_list, current_name)
+sequences_list <- c(sequences_list, current_sequence)
+
+# Create a data frame with the name and sequence information
+df <- data.frame(name = names_list, sequence = sequences_list)
+
+# Cleaning up
+# Removing unwanted variables
+rm(list = c("current_name", "current_sequence", "line", "lines", "names_list", "sequences_list"))
+# Garbage Collection = removing temporary memory
+invisible(gc())
+
+
+```
+
+
+```{r}
+
+#######################################################
+#STEP 2: SEPARATING OUT EACH POSITION INTO ITS OWN ROW#
+#######################################################
+
+# get the maximum length of the strings in the sequence column
+max_length <- max(str_length(df$sequence))
+
+# extend the strings by adding dashes to the end
+df$sequence <- str_pad(df$sequence, max_length, "right", "-")
+
+# Separating each nucleotide
+df$split <- strsplit(df$sequence, split="")
+
+# Removing sequence column as its no longer needed
+df.min <- subset(df, select = c("name", "split"))
+
+# Making species names the column names
+df.wide <- pivot_wider(df.min, names_from = name, values_from = split)
+
+# Seperating the list into individual rows
+data <- df.wide %>% unnest_longer(c(colnames(df.wide)))
+
+# Change data frame to lower case
+data_lower <- apply(data, 2, function(x) {
+  if (is.character(x)) {
+    tolower(x)
+  } else {
+    x
+  }
+})
+
+# Convert the result back to a data frame
+data_lower <- as.data.frame(data_lower)
+
+# Set the original column names
+colnames(data_lower) <- colnames(data)
+
+# Change the data frame name back
+data <- data_lower
+
+# Adding position column
+data$position <- seq(1,nrow(data),1)
+
+# Cleaning environment
+rm(list=setdiff(ls(), c("data", "df")))
+invisible(gc())
+
+
+
+```
+
+
+```{r}
+
+################################################################
+#STEP 3: COUNTING FREQUENCY OF EACH NUCLEOTIDE IN EACH POSITION#
+################################################################
+
+nucleotides <- c("a", "t", "c", "g", "n", "-")
+
+
+for (i in nucleotides) {
+  x <- rowSums(data == tolower(i))         # Counts the number of occurrences of the nucleotide across the rows
+  data[ , ncol(data) + 1] <- x             # Append new column
+  colnames(data)[ncol(data)] <- paste(i)  # Rename column name
+  
+}
+
+#clean up environment
+rm(list = c("i", "nucleotides", "x"))
+invisible(gc())
+
+```
+
+
+```{r}
+
+#########################################################################
+#STEP 4: FINDING CONSENSUS SEQUENCE AT A DESIGNATED THRESHOLD (75% HERE)#
+#########################################################################
+
+#create data frame with position & nucleotide counts only
+nucleotide_counts <- subset(data, select = c("position", "a", "t", "c", "g"))
+
+consensus_count <- nucleotide_counts %>%
+               pivot_longer(!position, names_to = "nucleotide", values_to = "count")
+
+consensus_count <- consensus_count[order(consensus_count$position),] # ordering data by position (ascending order)
+
+#change the formula below to achieve the correct consensus cut off - nrow(df) is the number of sequences in data set
+#here the threshold is set at 75%
+consensus_threshold <- nrow(df)/4*3
+
+
+# creates new temporary data frame tmp1, and identifies positions where a nucleotide occurs in more than 75% of all sequences, but omits positions where there is no consensus base
+tmp1 <- subset(consensus_count, consensus_count$count >= (consensus_threshold)) 
+
+#creating data frame with just positions
+tmp2 <- data.frame(position = seq(1,nrow(data),1)) 
+
+# adds back positions where there is no consensus base as NA
+consensus <- merge(tmp1, tmp2, all = TRUE)
+
+# Replacing missing nucleotides with -
+consensus$nucleotide[is.na(consensus$nucleotide) == TRUE] <- "-"
+
+
+#joins consensus into a single string
+consensus_sequence_str <- ""
+
+for (i in 1:nrow(consensus)) {
+  x <- consensus$nucleotide[i]
+  consensus_sequence_str <- paste(consensus_sequence_str, x, sep="") # Adding each residue one by one
+}
+
+
+############################################################################
+#OPTION 2 FOR CONSENSUS: CONSENSUS WITH NO CUTOFF, TAKES MOST ABUNDANT BASE#
+############################################################################
+
+#tmp1 <- consensus_count %>% 
+#          group_by(position) %>% 
+#           slice(which.max(count)) 
+
+#tmp2 <- data.frame(position = seq(1,nrow(data),1)) 
+
+#consensus <- merge(tmp1, tmp2, all = TRUE) # adds back positions not conserved as NA
+
+#consensus$nucleotide[is.na(consensus$nucleotide) == TRUE] <- "-" # Replacing missing residues with -
+
+#no_lim_consensus_sequence <- ""
+
+#for (i in 1:nrow(consensus)) {
+#  x <- consensus$nucleotide[i]
+#  no_lim_consensus_sequence <- paste(no_lim_consensus_sequence, x, sep="") # Adding each residue one by one
+#}
+
+# Adding consensus sequence to data
+consensus_seq <- consensus$nucleotide
+data <-cbind(consensus_seq,data)
+
+# Cleaning up environment
+rm(list = c("tmp1", "tmp2", "i", "x", "consensus_seq", "consensus_threshold", "nucleotide_counts", "consensus_count", "consensus", "df", "consensus_sequence_str"))
+invisible(gc())
+
+```
+
+
+```{r}
+################################################################################
+#STEP 5: SEQUENCE CHANGE ANALYSIS#
+################################################################################
+
+#before comparing datasets, make a new data frame with all sequences to be analysed, and only the sequence that comparisons are being made to
+data_no_ref <- data[,3:ncol(data)]
+analysis_dataset <- cbind(data$consensus_seq, data_no_ref) 
+#**change "consensus_seq" to WT sequence name if comparing against WT sequence
+
+
+#renaming consensus sequence in analysis_dataset
+names(analysis_dataset)[names(analysis_dataset) == 'data$consensus_seq'] <- 'consensus_seq'
+
+
+# Comparing to designated sequence
+ref_sequence_name = colnames(analysis_dataset)[1] 
+#**change index number depending on where the sequence you want to compare to is - 1 for consensus, 2 for WT
+
+# Make new col to store mutations
+analysis_dataset$`n_a>t` = 0
+analysis_dataset$`n_a>c` = 0
+analysis_dataset$`n_a>g` = 0
+analysis_dataset$`n_t>a` = 0
+analysis_dataset$`n_t>c` = 0
+analysis_dataset$`n_t>g` = 0
+analysis_dataset$`n_c>a` = 0
+analysis_dataset$`n_c>t` = 0
+analysis_dataset$`n_c>g` = 0
+analysis_dataset$`n_g>a` = 0
+analysis_dataset$`n_g>t` = 0
+analysis_dataset$`n_g>c` = 0
+
+
+#before starting code below, check what case the consensus/reference genome is in, and change case of the atcg accordingly in code
+for (i in 1:nrow(analysis_dataset)) {
+  if (analysis_dataset$`consensus_seq`[i] == "a") {
+    analysis_dataset$`n_a>t`[i] = analysis_dataset$t[i]
+    analysis_dataset$`n_a>c`[i] = analysis_dataset$c[i]
+    analysis_dataset$`n_a>g`[i] = analysis_dataset$g[i]
+  }
+  if (analysis_dataset$`consensus_seq`[i] == "t") {
+    analysis_dataset$`n_t>a`[i] = analysis_dataset$a[i]
+    analysis_dataset$`n_t>c`[i] = analysis_dataset$c[i]
+    analysis_dataset$`n_t>g`[i] = analysis_dataset$g[i]
+  }
+  if (analysis_dataset$`consensus_seq`[i] == "c") {
+    analysis_dataset$`n_c>t`[i] = analysis_dataset$t[i]
+    analysis_dataset$`n_c>a`[i] = analysis_dataset$a[i]
+    analysis_dataset$`n_c>g`[i] = analysis_dataset$g[i]
+  }
+  if (analysis_dataset$`consensus_seq`[i] == "g") {
+    analysis_dataset$`n_g>t`[i] = analysis_dataset$t[i]
+    analysis_dataset$`n_g>a`[i] = analysis_dataset$a[i]
+    analysis_dataset$`n_g>c`[i] = analysis_dataset$c[i]
+  }
+}
+
+
+# Cleaning Environment
+rm(list = c("i", "data_no_ref", "ref_sequence_name", "df"))
+invisible(gc())
+```
+
+
+```{r}
+
+################################################################################
+#Step 6: FILTERING FOR FREQUENCY AND CREATING NEW FILTERED DATA FRAMES#
+################################################################################
+
+
+#filter rows based on frequency of mutation
+frequency_threshold <- c(50) 
+#Enter the raw number of mutations that represents the frequency threshold cutoff, i.e. 5% of 1000 = 50, so put in 50. Can analyse based on multiple frequency cutoffs by entering multiple cutoffs
+
+
+#for loop to loop through multiple frequency thresholds
+for (i in 1:length(frequency_threshold)) {#
+  #creating a filtered intermediate, where only columns starting with "n_" are filtered (mutation count columns only)
+  #all mutation count columns filtered at the same time
+  #If any position has a count in any column that is above the mutation frequency threshold, omit the position from analysis
+  filtered_intermediate <-  analysis_dataset %>%
+                              filter(if_all(starts_with("n_"), ~ . <= frequency_threshold[i]))
+  
+  #make a new data frame for the filtered results of each frequency threshold (high freq mutation sites omitted)
+  #each data set will be named "frequency_threshold" followed by the frequency threshold, for instance, frequency_threshold50
+  assign(paste("filtered_freq_", (frequency_threshold[i]), sep = ""), filtered_intermediate)
+}
+
+#cleaning up environment
+rm(list = c("i", "frequency_threshold", "filtered_intermediate"))
+invisible(gc())
+
+```
+
+
+```{r}
+#################################################################################
+#ANALYSIS 1: TOTAL BASE COUNT#
+#################################################################################
+
+#calculating total number of bases (regardless of mutation frequency threshold)
+total_base_count <- data.frame(n_A=sum(analysis_dataset$a), 
+                               n_C=sum(analysis_dataset$c), 
+                               n_T=sum(analysis_dataset$t), 
+                               n_G=sum(analysis_dataset$g))
+
+```
+
+
+```{r}
+#################################################################################
+#ANALYSIS 2: SEQUENCE CHANGE COUNT (CONSTRAINED BY FREQ THRESHOLD)#
+#################################################################################
+
+#filter rows based on frequency of mutation
+frequency_threshold <- c(5,10,50,100) #Enter the raw number of mutations that represents the frequency threshold cutoff, i.e. 5% of 1000 = 50, so put in 50. Can analyse based on multiple frequency cutoffs by entering multiple cutoffs
+
+#create new data frame to put additional analysis results in
+sequence_change_analysis <- data.frame()
+
+#creating list where each item is the column name of a mutation count. Specified using tail function, which identifies last 12 columns of the analysis_dataset
+mutation_count_col_names <- tail(colnames(analysis_dataset), n=12)
+
+
+#for loop to loop through multiple frequency thresholds
+for (i in 1:length(frequency_threshold)) {#
+  #creating a filtered intermediate, where only columns starting with "n_" are filtered (mutation count columns only)
+  #all mutation count columns filtered at the same time
+  #If any position has a count in any column that is above the mutation frequency threshold, omit the position from analysis
+  filtered_intermediate <-  analysis_dataset %>%
+                              filter(if_all(starts_with("n_"), ~ . <= frequency_threshold[i]))
+  
+  #make a new data frame for the filtered results of each frequency threshold (high freq mutation sites omitted)
+  #each data set will be named "frequency_threshold" followed by the frequency threshold, for instance, frequency_threshold50
+  assign(paste("filtered_freq_", (frequency_threshold[i]), sep = ""), filtered_intermediate)
+  
+  #creates empty temporary data frame to hold the analysis output so to make it easier to add column to final analysis dataset
+  tmp_df <- data.frame(freq_threshold = NA)  
+  tmp_df$freq_threshold <- frequency_threshold[i]
+
+  #for loop to loop through each mutation count
+  for (j in mutation_count_col_names){ 
+    
+     #creates temporary data frame x, where each mutation count row in the filtered intermediate is pasted into x
+     x <- filtered_intermediate[j] 
+     
+     #finds sum of all counts in x for a final count of mutation occurring below the frequency threshold
+     y <- sum(x)
+     
+     #adds new column to tmp_df containing y
+     tmp_df[ , ncol(tmp_df) + 1] <- y
+     #renames column with mutation count column name
+     colnames(tmp_df)[ncol(tmp_df)] <- paste(j)
+  
+  }
+  
+  #for loop to loop through each nucleotide count
+  for (k in c("a", "t", "g", "c")) {
+    x <- filtered_intermediate[k]
+    y <- sum(x)
+    tmp_df$y <- y
+    colnames(tmp_df)[ncol(tmp_df)] <- paste(k)
+    
+  }
+  
+  #add everything to final analysis dataset
+  sequence_change_analysis <- bind_rows(sequence_change_analysis, tmp_df)
+  
+}
+
+#ratio of C>U/U>C
+sequence_change_analysis <- sequence_change_analysis %>% mutate(`rc>t` = sequence_change_analysis$`n_c>t` / sequence_change_analysis$`n_t>c`)
+
+#normalised ratio of C>U/U>C (in relation to the number of Cs and Us, (nC>U/nU>C) * (nU/nC))
+sequence_change_analysis <- sequence_change_analysis %>% mutate(`nrc>t` = sequence_change_analysis$`rc>t` * (sequence_change_analysis$t / sequence_change_analysis$c))
+
+#ratio of G>A/A>G
+sequence_change_analysis <- sequence_change_analysis %>% mutate(`rg>a` = sequence_change_analysis$`n_g>a` / sequence_change_analysis$`n_a>g`)
+
+#normalised ratio of G>A/A>G (in relation to the number of Gs and As, (nG>A/nA>G) * (nA/nG))
+sequence_change_analysis <- sequence_change_analysis %>% mutate(`nrg>a` = sequence_change_analysis$`rg>a` * (sequence_change_analysis$a / sequence_change_analysis$g))
+
+
+
+rm(list = c("freq_col_names", "frequency_threshold", "j", "k", "y", "mutation_count_col_names", "x", "tmp_df", "filtered_intermediate"))
+
+```
+
+
+
+
+
+
+
+
+
