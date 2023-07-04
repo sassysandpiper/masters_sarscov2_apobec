@@ -1,0 +1,180 @@
+--------------------------------------------------------------------------------
+ModelTest-NG v0.2.0
+
+Input data:
+  MSA:        RaT13G_allclades_n220.fasta
+  Tree:       Maximum parsimony
+    file:           -
+  #taxa:            222
+  #sites:           29891
+  #patterns:        1753
+  Max. thread mem:  191 MB
+
+Output:
+  Log:           RaT13G_allclades_n220.fasta.log
+  Starting tree: RaT13G_allclades_n220.fasta.tree
+  Results:       RaT13G_allclades_n220.fasta.out
+
+Selection options:
+  # dna schemes:      11
+  # dna models:       88
+  include model parameters:
+    Uniform:         true
+    p-inv (+I):      true
+    gamma (+G):      true
+    both (+I+G):     true
+    free rates (+R): false
+    fixed freqs:     true
+    estimated freqs: true
+    #categories:     4
+  gamma rates mode:   mean
+  asc bias:           none
+  epsilon (opt):      0.01
+  epsilon (par):      0.05
+  keep branches:      false
+
+Additional options:
+  verbosity:        very low
+  threads:          20/24
+  RNG seed:         12345
+  subtree repeats:  enabled
+--------------------------------------------------------------------------------
+
+BIC       model              K            lnL          score          delta    weight
+--------------------------------------------------------------------------------
+       1  GTR+I+G4          10    -61399.6448    127446.9856         0.0000    1.0000
+       2  GTR+G4             9    -61418.9139    127475.2186        28.2330    0.0000
+       3  GTR+I              9    -61424.5131    127486.4169        39.4313    0.0000
+       4  TIM1+I+G4          8    -61440.6592    127508.4037        61.4181    0.0000
+       5  TIM2+I+G4          8    -61452.9048    127532.8949        85.9093    0.0000
+       6  TIM1+G4            7    -61459.0557    127534.8915        87.9060    0.0000
+       7  TIM1+I             7    -61465.8045    127548.3890       101.4034    0.0000
+       8  TIM2+G4            7    -61470.7389    127558.2580       111.2724    0.0000
+       9  TIM3+I+G4          8    -61469.2441    127565.5736       118.5880    0.0000
+      10  TIM2+I             7    -61477.4605    127571.7011       124.7155    0.0000
+--------------------------------------------------------------------------------
+Best model according to BIC
+---------------------------
+Model:              GTR+I+G4
+lnL:                -61399.6448
+Frequencies:        0.2990 0.1782 0.1927 0.3301
+Subst. Rates:       0.3769 1.7436 0.3193 0.2432 5.2148 1.0000 
+Inv. sites prop:    0.5893
+Gamma shape:        1.1095
+Score:              127446.9856
+Weight:             1.0000
+---------------------------
+Parameter importances
+---------------------------
+P.Inv:              0.0000
+Gamma:              0.0000
+Gamma-Inv:          1.0000
+Frequencies:        1.0000
+---------------------------
+Model averaged estimates
+---------------------------
+P.Inv:              0.7491
+Alpha:              0.1436
+Alpha-P.Inv:        1.1095
+P.Inv-Alpha:        0.5893
+Frequencies:        0.2990 0.1782 0.1927 0.3301 
+
+Commands:
+  > phyml  -i RaT13G_allclades_n220.fasta -m 012345 -f m -v e -a e -c 4 -o tlr
+  > raxmlHPC-SSE3 -s RaT13G_allclades_n220.fasta -m GTRGAMMAIX -n EXEC_NAME -p PARSIMONY_SEED
+  > raxml-ng --msa RaT13G_allclades_n220.fasta --model GTR+I+G4
+  > paup -s RaT13G_allclades_n220.fasta
+  > iqtree -s RaT13G_allclades_n220.fasta -m GTR+I+G4
+
+AIC       model              K            lnL          score          delta    weight
+--------------------------------------------------------------------------------
+       1  GTR+I+G4          10    -61399.6448    123701.2896         0.0000    1.0000
+       2  GTR+G4             9    -61418.9139    123737.8279        36.5383    0.0000
+       3  GTR+I              9    -61424.5131    123749.0261        47.7366    0.0000
+       4  TIM1+I+G4          8    -61440.6592    123779.3183        78.0288    0.0000
+       5  TIM2+I+G4          8    -61452.9048    123803.8095       102.5200    0.0000
+       6  TIM1+G4            7    -61459.0557    123814.1115       112.8219    0.0000
+       7  TIM1+I             7    -61465.8045    123827.6089       126.3194    0.0000
+       8  TIM3+I+G4          8    -61469.2441    123836.4882       135.1986    0.0000
+       9  TIM2+G4            7    -61470.7389    123837.4779       136.1883    0.0000
+      10  TIM2+I             7    -61477.4605    123850.9210       149.6314    0.0000
+--------------------------------------------------------------------------------
+Best model according to AIC
+---------------------------
+Model:              GTR+I+G4
+lnL:                -61399.6448
+Frequencies:        0.2990 0.1782 0.1927 0.3301
+Subst. Rates:       0.3769 1.7436 0.3193 0.2432 5.2148 1.0000 
+Inv. sites prop:    0.5893
+Gamma shape:        1.1095
+Score:              123701.2896
+Weight:             1.0000
+---------------------------
+Parameter importances
+---------------------------
+P.Inv:              0.0000
+Gamma:              0.0000
+Gamma-Inv:          1.0000
+Frequencies:        1.0000
+---------------------------
+Model averaged estimates
+---------------------------
+P.Inv:              0.7491
+Alpha:              0.1436
+Alpha-P.Inv:        1.1095
+P.Inv-Alpha:        0.5893
+Frequencies:        0.2990 0.1782 0.1927 0.3301 
+
+Commands:
+  > phyml  -i RaT13G_allclades_n220.fasta -m 012345 -f m -v e -a e -c 4 -o tlr
+  > raxmlHPC-SSE3 -s RaT13G_allclades_n220.fasta -m GTRGAMMAIX -n EXEC_NAME -p PARSIMONY_SEED
+  > raxml-ng --msa RaT13G_allclades_n220.fasta --model GTR+I+G4
+  > paup -s RaT13G_allclades_n220.fasta
+  > iqtree -s RaT13G_allclades_n220.fasta -m GTR+I+G4
+
+AICc      model              K            lnL          score          delta    weight
+--------------------------------------------------------------------------------
+       1  GTR+I+G4          10    -61399.6448    123714.2896         0.0000    1.0000
+       2  GTR+G4             9    -61418.9139    123750.8279        36.5383    0.0000
+       3  GTR+I              9    -61424.5131    123762.0261        47.7366    0.0000
+       4  TIM1+I+G4          8    -61440.6592    123792.3183        78.0288    0.0000
+       5  TIM2+I+G4          8    -61452.9048    123816.8095       102.5200    0.0000
+       6  TIM1+G4            7    -61459.0557    123827.1115       112.8219    0.0000
+       7  TIM1+I             7    -61465.8045    123840.6089       126.3194    0.0000
+       8  TIM3+I+G4          8    -61469.2441    123849.4882       135.1986    0.0000
+       9  TIM2+G4            7    -61470.7389    123850.4779       136.1883    0.0000
+      10  TIM2+I             7    -61477.4605    123863.9210       149.6314    0.0000
+--------------------------------------------------------------------------------
+Best model according to AICc
+---------------------------
+Model:              GTR+I+G4
+lnL:                -61399.6448
+Frequencies:        0.2990 0.1782 0.1927 0.3301
+Subst. Rates:       0.3769 1.7436 0.3193 0.2432 5.2148 1.0000 
+Inv. sites prop:    0.5893
+Gamma shape:        1.1095
+Score:              123714.2896
+Weight:             1.0000
+---------------------------
+Parameter importances
+---------------------------
+P.Inv:              0.0000
+Gamma:              0.0000
+Gamma-Inv:          1.0000
+Frequencies:        1.0000
+---------------------------
+Model averaged estimates
+---------------------------
+P.Inv:              0.7491
+Alpha:              0.1436
+Alpha-P.Inv:        1.1095
+P.Inv-Alpha:        0.5893
+Frequencies:        0.2990 0.1782 0.1927 0.3301 
+
+Commands:
+  > phyml  -i RaT13G_allclades_n220.fasta -m 012345 -f m -v e -a e -c 4 -o tlr
+  > raxmlHPC-SSE3 -s RaT13G_allclades_n220.fasta -m GTRGAMMAIX -n EXEC_NAME -p PARSIMONY_SEED
+  > raxml-ng --msa RaT13G_allclades_n220.fasta --model GTR+I+G4
+  > paup -s RaT13G_allclades_n220.fasta
+  > iqtree -s RaT13G_allclades_n220.fasta -m GTR+I+G4
+Done
