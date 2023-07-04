@@ -1,0 +1,6 @@
+"Each clade compared to its own 75% consensus, with 5% frequency threshold. Data below shows mean normalised mutation ratio of each transition pair.",,,
+,,,
+,,,
+ratio,value,CI_lower,CI_upper
+nrC>U,8.067371933,7.012075386,9.12266848
+nrG>A,1.179495442,1.04403729,1.314953594
